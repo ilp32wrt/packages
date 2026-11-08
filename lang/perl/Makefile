@@ -120,8 +120,9 @@ define Build/Configure
 	                                -Dsysroot='$(TOOLCHAIN_ROOT_DIR)' \
 	                                files/version.config \
 	                                files/base.config \
-	                                files/$(patsubst i386,i486,$(ARCH)).config \
+	                                files/$(patsubst i386,i486,$(ARCH))$(if $(CONFIG_AARCH64_ABI_ILP32),_ilp32).config \
 	                                files/architecture.config \
+	                                $(if $(CONFIG_AARCH64_ABI_ILP32),files/aarch64_ilp32-late.config) \
 	                                files/signal.config \
 	                                files/threads.config \
 	                                files/libc.config \
