@@ -1,0 +1,27 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: configure: no profile-use flag in cross builds without a profile task
+
+With --enable-optimizations, a cross build runs no profile task (009), so
+the profile-guided build step compiles with the profile-use flag but no
+profile exists. GCC only warns about the missing data; clang stops on the
+missing profile file (code.profclangd). Leave the flag empty then.
+
+Measured on an AArch64 ILP32 OpenWrt One with GCC 14.3 (-Os, LTO):
+without the flag the speed is the same (geometric mean of 9 benchmarks
++0.3%).
+
+Signed-off-by: liviyifan <344781483+liviyifan@users.noreply.github.com>
+---
+--- a/configure.ac
++++ b/configure.ac
+@@ -2177,6 +2177,10 @@
+     ;;
+ esac
+ 
++# A cross build runs no profile task (PROFILE_TASK is empty), so there is no profile to use: GCC
++# would only warn about the missing data, clang stops on the missing profile file.
++AS_IF([test "x$cross_compiling" = xyes -a -z "$PROFILE_TASK"], [PGO_PROF_USE_FLAG=""])
++
+ # BOLT optimization. Always configured after PGO since it always runs after PGO.
+ Py_BOLT='false'
+ AC_MSG_CHECKING([for --enable-bolt])

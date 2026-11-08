@@ -1,0 +1,28 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: sysconfig: report linux-aarch64_ilp32 on AArch64 ILP32
+
+An AArch64 ILP32 python reported linux-aarch64, and packaging (pip) takes
+linux_aarch64 with 32-bit pointers for 32-bit ARM: its tags became
+linux_armv8l/armv7l, and with musl also musllinux_*_armv7l/armv8l, so pip
+would install AArch32 wheels from PyPI that cannot be loaded. With its own
+platform the tags are musllinux_1_x_aarch64_ilp32, linux_aarch64_ilp32
+and any.
+
+Only the run-time path changes: cross builds set _PYTHON_HOST_PLATFORM,
+which is returned before this code.
+
+Signed-off-by: liviyifan <344781483+liviyifan@users.noreply.github.com>
+--- a/Lib/sysconfig/__init__.py
++++ b/Lib/sysconfig/__init__.py
+@@ -659,6 +659,11 @@
+                 "x86_64": "x86_64",
+             }[machine]
+         else:
++            # AArch64 ILP32 (32-bit pointers, AArch64 instructions): its own
++            # platform, so that wheel tags do not take it for 32-bit ARM
++            # (packaging maps linux_aarch64 with 32-bit pointers to armv8l)
++            if machine == "aarch64" and sys.maxsize < 2**32:
++                machine = "aarch64_ilp32"
+             # At least on Linux/Intel, 'machine' is the processor --
+             # i386, etc.
+             # XXX what about Alpha, SPARC, etc?
