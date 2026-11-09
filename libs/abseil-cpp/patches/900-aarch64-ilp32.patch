@@ -1,0 +1,40 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: AArch64 ILP32: DirectMmap with mmap2, std::min types
+
+AArch64 ILP32 has 32-bit long and, like the other 32-bit ABIs, mmap2
+(SYS_mmap2, offset in pages) instead of SYS_mmap.
+
+Its size_t is unsigned long while uintptr_t is unsigned int, so
+std::min(uintptr_t, size_t) has no matching overload; name the type.
+
+---
+--- a/absl/base/internal/direct_mmap.h
++++ b/absl/base/internal/direct_mmap.h
+@@ -79,6 +79,7 @@
+     (defined(__mips__) && _MIPS_SIM == _MIPS_SIM_ABI32) ||                   \
+     (defined(__PPC__) && !defined(__PPC64__)) ||                             \
+     (defined(__riscv) && __riscv_xlen == 32) ||                              \
++    (defined(__aarch64__) && defined(__ILP32__)) ||                          \
+     (defined(__s390__) && !defined(__s390x__)) ||                            \
+     (defined(__sparc__) && !defined(__arch64__))
+   // On these architectures, implement mmap with mmap2.
+--- a/absl/crc/internal/non_temporal_memcpy.h
++++ b/absl/crc/internal/non_temporal_memcpy.h
+@@ -66,7 +66,7 @@
+     uintptr_t bytes_before_alignment_boundary =
+         kCacheLineSize -
+         (reinterpret_cast<uintptr_t>(d) & (kCacheLineSize - 1));
+-    size_t header_len = (std::min)(bytes_before_alignment_boundary, len);
++    size_t header_len = (std::min<size_t>)(bytes_before_alignment_boundary, len);
+     assert(bytes_before_alignment_boundary < kCacheLineSize);
+     memcpy(d, s, header_len);
+     d += header_len;
+@@ -134,7 +134,7 @@
+     uintptr_t bytes_before_alignment_boundary =
+         kCacheLineSize -
+         (reinterpret_cast<uintptr_t>(d) & (kCacheLineSize - 1));
+-    size_t header_len = (std::min)(bytes_before_alignment_boundary, len);
++    size_t header_len = (std::min<size_t>)(bytes_before_alignment_boundary, len);
+     assert(bytes_before_alignment_boundary < kCacheLineSize);
+     memcpy(d, s, header_len);
+     d += header_len;
