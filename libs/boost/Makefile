@@ -288,6 +288,7 @@ define Package/boost/config
 			$(if $(findstring fiber,$(lib)),depends on !boost-fiber-exclude,)\
 			$(if $(findstring context,$(lib)),depends on !boost-context-exclude,)
 			$(if $(findstring coroutine,$(lib)),depends on !boost-coroutine-exclude,)
+			$(if $(findstring cobalt,$(lib)),depends on !boost-context-exclude,)
 		)
 	endmenu
 endef
