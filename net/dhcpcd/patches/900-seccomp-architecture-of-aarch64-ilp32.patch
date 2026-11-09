@@ -1,0 +1,19 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: privsep-linux: seccomp architecture of AArch64 ILP32
+
+The ILP32 kernel reports AUDIT_ARCH_AARCH64ILP32 (0xd00000b7) for AArch64 ILP32 tasks;
+with AUDIT_ARCH_AARCH64 the privilege separation filter would kill dhcpcd's helpers there.
+
+Signed-off-by: liviyifan <344781483+liviyifan@users.noreply.github.com>
+---
+--- a/src/privsep-linux.c
++++ b/src/privsep-linux.c
+@@ -192,6 +192,8 @@
+ #  else
+ #    define SECCOMP_AUDIT_ARCH AUDIT_ARCH_ARMEB
+ #  endif
++#elif defined(__aarch64__) && defined(__ILP32__)
++#  define SECCOMP_AUDIT_ARCH 0xd00000b7U /* AUDIT_ARCH_AARCH64ILP32 */
+ #elif defined(__aarch64__)
+ #  define SECCOMP_AUDIT_ARCH AUDIT_ARCH_AARCH64
+ #elif defined(__alpha__)

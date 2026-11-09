@@ -1,0 +1,24 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: exec_ptrace: seccomp architecture of AArch64 ILP32
+
+The ILP32 kernel reports AUDIT_ARCH_AARCH64ILP32 (0xd00000b7) for AArch64 ILP32 tasks;
+the ptrace intercept filter compared with AUDIT_ARCH_AARCH64. The registers are the same
+user_pt_regs as on LP64.
+
+Signed-off-by: liviyifan <344781483+liviyifan@users.noreply.github.com>
+---
+--- a/src/exec_ptrace.h
++++ b/src/exec_ptrace.h
+@@ -88,7 +88,11 @@
+ # define reg_arg3(x)		(x).rdx
+ # define reg_arg4(x)		(x).r10
+ #elif defined(__aarch64__)
+-# define SECCOMP_AUDIT_ARCH	AUDIT_ARCH_AARCH64
++# if defined(__ILP32__)
++#  define SECCOMP_AUDIT_ARCH	0xd00000b7U /* AUDIT_ARCH_AARCH64ILP32 */
++# else
++#  define SECCOMP_AUDIT_ARCH	AUDIT_ARCH_AARCH64
++# endif
+ # define sudo_pt_regs		struct user_pt_regs
+ # define reg_syscall(x)		(x).regs[8]	/* w8 */
+ # define reg_retval(x)		(x).regs[0]	/* x0 */
