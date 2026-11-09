@@ -1,0 +1,26 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: tpool: io_pgetevents where there is no io_getevents
+
+32-bit ABIs that only have 64-bit time system calls (AArch64 ILP32, riscv32)
+have no io_getevents. Use io_pgetevents_time64 with no timeout and no signal
+mask there, which waits the same way.
+
+---
+--- a/tpool/aio_libaio.cc
++++ b/tpool/aio_libaio.cc
+@@ -60,8 +60,15 @@
+   noexcept
+ {
+   int saved_errno= errno;
++#if !defined(__NR_io_getevents) && defined(__NR_io_pgetevents_time64)
++  /* 32-bit ABIs with 64-bit time only (AArch64 ILP32, riscv32): no
++  io_getevents; io_pgetevents with no timeout and no signal mask is the same */
++  int ret= syscall(__NR_io_pgetevents_time64, reinterpret_cast<long>(ctx),
++                   min_nr, nr, ev, 0, 0);
++#else
+   int ret= syscall(__NR_io_getevents, reinterpret_cast<long>(ctx),
+                    min_nr, nr, ev, 0);
++#endif
+   if (ret < 0)
+   {
+     ret= -errno;
