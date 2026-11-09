@@ -1,0 +1,27 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: sandbox-seccomp-filter: architecture of AArch64 ILP32
+
+The ILP32 kernel reports AUDIT_ARCH_AARCH64ILP32 (0xd00000b7) for AArch64 ILP32 tasks,
+but configure sets AUDIT_ARCH_AARCH64 for every aarch64* host, so on that kernel the
+pre-auth sandbox would kill the child at its first system call and no login would work.
+
+Signed-off-by: liviyifan <344781483+liviyifan@users.noreply.github.com>
+---
+--- a/sandbox-seccomp-filter.c
++++ b/sandbox-seccomp-filter.c
+@@ -77,6 +77,15 @@
+ #include "xmalloc.h"
+ 
+ /* Linux seccomp_filter sandbox */
++/*
++ * AArch64 ILP32 tasks report AUDIT_ARCH_AARCH64ILP32 on the ILP32 kernel, while
++ * configure picks AUDIT_ARCH_AARCH64 for every aarch64* host.
++ */
++#if defined(__aarch64__) && defined(__ILP32__)
++# undef SECCOMP_AUDIT_ARCH
++# define SECCOMP_AUDIT_ARCH 0xd00000b7U /* AUDIT_ARCH_AARCH64ILP32 */
++#endif
++
+ #define SECCOMP_FILTER_FAIL SECCOMP_RET_KILL
+ 
+ /* Use a signal handler to emit violations when debugging */
