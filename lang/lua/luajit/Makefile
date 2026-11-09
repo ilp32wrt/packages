@@ -36,7 +36,8 @@ endef
 define Package/luajit/config
 config HAS_LUAJIT_ARCH
 	bool
-	default y if i386||x86_64||arm||armeb||aarch64||powerpc||mips||mipsel||mips64||riscv64
+	# LuaJIT has no AArch64 ILP32 support (lj_arch.h)
+	default y if (i386||x86_64||arm||armeb||aarch64||powerpc||mips||mipsel||mips64||riscv64) && !AARCH64_ABI_ILP32
 endef
 
 ifeq ($(HOST_ARCH),$(filter $(HOST_ARCH), x86_64 mips64))
