@@ -1,0 +1,151 @@
+From d557bac1704666a5a75c9e11f1c1d025e6ea2398 Mon Sep 17 00:00:00 2001
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 07:28:58 +0800
+Subject: [PATCH 2/3] tests: add aarch64ilp32 to the arch tests
+
+Add the new arch to the little-endian and 32-bit groups of the
+regression script and to the resolver, arch_basic, arch_all_le_basic and
+iterate_syscalls tests.
+---
+ tests/15-basic-resolver.c          | 1 +
+ tests/16-sim-arch_basic.c          | 6 ++++++
+ tests/16-sim-arch_basic.py         | 1 +
+ tests/23-sim-arch_all_le_basic.c   | 3 +++
+ tests/23-sim-arch_all_le_basic.py  | 1 +
+ tests/56-basic-iterate_syscalls.c  | 1 +
+ tests/56-basic-iterate_syscalls.py | 1 +
+ tests/regression                   | 6 +++---
+ 8 files changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/tests/15-basic-resolver.c b/tests/15-basic-resolver.c
+index 6db69e8..9f62110 100644
+--- a/tests/15-basic-resolver.c
++++ b/tests/15-basic-resolver.c
+@@ -32,6 +32,7 @@ unsigned int arch_list[] = {
+ 	SCMP_ARCH_X32,
+ 	SCMP_ARCH_ARM,
+ 	SCMP_ARCH_AARCH64,
++	SCMP_ARCH_AARCH64ILP32,
+ 	SCMP_ARCH_MIPS,
+ 	SCMP_ARCH_MIPS64,
+ 	SCMP_ARCH_MIPS64N32,
+diff --git a/tests/16-sim-arch_basic.c b/tests/16-sim-arch_basic.c
+index 0b141e1..d07fd0a 100644
+--- a/tests/16-sim-arch_basic.c
++++ b/tests/16-sim-arch_basic.c
+@@ -78,6 +78,9 @@ int main(int argc, char *argv[])
+ 	if (rc != 0)
+ 		goto out;
+ 	rc = seccomp_arch_add(ctx, SCMP_ARCH_AARCH64);
++	if (rc != 0)
++		goto out;
++	rc = seccomp_arch_add(ctx, SCMP_ARCH_AARCH64ILP32);
+ 	if (rc != 0)
+ 		goto out;
+ 	rc = seccomp_arch_add(ctx, SCMP_ARCH_MIPSEL);
+@@ -145,6 +148,9 @@ int main(int argc, char *argv[])
+ 	if (rc != 0)
+ 		goto out;
+ 	rc = seccomp_arch_remove(ctx, SCMP_ARCH_AARCH64);
++	if (rc != 0)
++		goto out;
++	rc = seccomp_arch_remove(ctx, SCMP_ARCH_AARCH64ILP32);
+ 	if (rc != 0)
+ 		goto out;
+ 	rc = seccomp_arch_remove(ctx, SCMP_ARCH_MIPSEL);
+diff --git a/tests/16-sim-arch_basic.py b/tests/16-sim-arch_basic.py
+index 846553f..4fbcee1 100755
+--- a/tests/16-sim-arch_basic.py
++++ b/tests/16-sim-arch_basic.py
+@@ -40,6 +40,7 @@ def test(args):
+     f.add_arch(Arch("x32"))
+     f.add_arch(Arch("arm"))
+     f.add_arch(Arch("aarch64"))
++    f.add_arch(Arch("aarch64ilp32"))
+     f.add_arch(Arch("mipsel"))
+     f.add_arch(Arch("mipsel64"))
+     f.add_arch(Arch("mipsel64n32"))
+diff --git a/tests/23-sim-arch_all_le_basic.c b/tests/23-sim-arch_all_le_basic.c
+index 32739e5..7f6761d 100644
+--- a/tests/23-sim-arch_all_le_basic.c
++++ b/tests/23-sim-arch_all_le_basic.c
+@@ -57,6 +57,9 @@ int main(int argc, char *argv[])
+ 	if (rc != 0)
+ 		goto out;
+ 	rc = seccomp_arch_add(ctx, seccomp_arch_resolve_name("aarch64"));
++	if (rc != 0)
++		goto out;
++	rc = seccomp_arch_add(ctx, seccomp_arch_resolve_name("aarch64ilp32"));
+ 	if (rc != 0)
+ 		goto out;
+ 	rc = seccomp_arch_add(ctx, seccomp_arch_resolve_name("mipsel"));
+diff --git a/tests/23-sim-arch_all_le_basic.py b/tests/23-sim-arch_all_le_basic.py
+index 33eedb1..5b5fd4c 100755
+--- a/tests/23-sim-arch_all_le_basic.py
++++ b/tests/23-sim-arch_all_le_basic.py
+@@ -36,6 +36,7 @@ def test(args):
+     f.add_arch(Arch("x32"))
+     f.add_arch(Arch("arm"))
+     f.add_arch(Arch("aarch64"))
++    f.add_arch(Arch("aarch64ilp32"))
+     f.add_arch(Arch("mipsel"))
+     f.add_arch(Arch("mipsel64"))
+     f.add_arch(Arch("mipsel64n32"))
+diff --git a/tests/56-basic-iterate_syscalls.c b/tests/56-basic-iterate_syscalls.c
+index 5e7ab67..e77d7e8 100644
+--- a/tests/56-basic-iterate_syscalls.c
++++ b/tests/56-basic-iterate_syscalls.c
+@@ -33,6 +33,7 @@ unsigned int arch_list[] = {
+ 	SCMP_ARCH_X32,
+ 	SCMP_ARCH_ARM,
+ 	SCMP_ARCH_AARCH64,
++	SCMP_ARCH_AARCH64ILP32,
+ 	SCMP_ARCH_MIPS,
+ 	SCMP_ARCH_MIPS64,
+ 	SCMP_ARCH_MIPS64N32,
+diff --git a/tests/56-basic-iterate_syscalls.py b/tests/56-basic-iterate_syscalls.py
+index 77a5b89..87d0cb1 100755
+--- a/tests/56-basic-iterate_syscalls.py
++++ b/tests/56-basic-iterate_syscalls.py
+@@ -33,6 +33,7 @@ arch_list = ["x86",
+              "x32",
+              "arm",
+              "aarch64",
++             "aarch64ilp32",
+              "mipsel",
+              "mipsel64",
+              "mipsel64n32",
+diff --git a/tests/regression b/tests/regression
+index f938b1b..c2d1a9d 100755
+--- a/tests/regression
++++ b/tests/regression
+@@ -23,7 +23,7 @@
+ 
+ GLBL_ARCH_LE_SUPPORT=" \
+ 	x86 x86_64 x32 \
+-	arm aarch64 \
++	arm aarch64 aarch64ilp32 \
+ 	mipsel mipsel64 mipsel64n32 \
+ 	ppc64le \
+ 	riscv64"
+@@ -35,7 +35,7 @@ GLBL_ARCH_BE_SUPPORT=" \
+ 
+ GLBL_ARCH_32B_SUPPORT=" \
+ 	x86 x32 \
+-	arm \
++	arm aarch64ilp32 \
+ 	mips mipsel mips64n32 mipsel64n32 \
+ 	parisc \
+ 	ppc \
+@@ -796,7 +796,7 @@ function run_test_live() {
+ 
+ 	# setup the arch specific return values
+ 	case "$arch" in
+-	x86|x86_64|x32|arm|aarch64|parisc|parisc64|ppc|ppc64|ppc64le|ppc|s390|s390x|riscv64)
++	x86|x86_64|x32|arm|aarch64|aarch64ilp32|parisc|parisc64|ppc|ppc64|ppc64le|ppc|s390|s390x|riscv64)
+ 		rc_kill_process=159
+ 		rc_kill=159
+ 		rc_allow=160
+-- 
+2.43.0
+
