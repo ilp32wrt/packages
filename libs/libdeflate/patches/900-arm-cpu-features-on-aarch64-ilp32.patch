@@ -1,0 +1,48 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: arm: CPU features on AArch64 ILP32
+
+On AArch64 ILP32 long is 32 bits, so the 64-bit static assertion fails.
+Read AT_HWCAP and AT_HWCAP2 with getauxval() there instead of parsing
+/proc/self/auxv as pairs of long.
+
+---
+--- a/lib/arm/cpu_features.c
++++ b/lib/arm/cpu_features.c
+@@ -60,6 +60,19 @@
+ #define AT_HWCAP	16
+ #define AT_HWCAP2	26
+ 
++#if defined(__aarch64__) && defined(__ILP32__)
++/*
++ * AArch64 ILP32: long is 32 bits; take the values from the C library (musl
++ * has getauxval()) instead of parsing /proc/self/auxv as pairs of long.
++ */
++#include <sys/auxv.h>
++
++static void scan_auxv(unsigned long *hwcap, unsigned long *hwcap2)
++{
++	*hwcap = getauxval(AT_HWCAP);
++	*hwcap2 = getauxval(AT_HWCAP2);
++}
++#else
+ static void scan_auxv(unsigned long *hwcap, unsigned long *hwcap2)
+ {
+ 	int fd;
+@@ -101,6 +114,7 @@
+ out:
+ 	close(fd);
+ }
++#endif /* AArch64 ILP32 */
+ 
+ static u32 query_arm_cpu_features(void)
+ {
+@@ -115,7 +129,9 @@
+ 	if (hwcap & (1 << 12))	/* HWCAP_NEON */
+ 		features |= ARM_CPU_FEATURE_NEON;
+ #else
++#ifndef __ILP32__
+ 	STATIC_ASSERT(sizeof(long) == 8);
++#endif
+ 	if (hwcap & (1 << 1))	/* HWCAP_ASIMD */
+ 		features |= ARM_CPU_FEATURE_NEON;
+ 	if (hwcap & (1 << 4))	/* HWCAP_PMULL */
