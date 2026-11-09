@@ -198,6 +198,14 @@ GO_PKG_BUILD_CONFIG_VARS= \
 	GO_BUILD_DEPENDS_PATH="$(GO_PKG_BUILD_DEPENDS_PATH)" \
 	GO_BUILD_DEPENDS_SRC="$(GO_PKG_BUILD_DEPENDS_SRC)"
 
+# AArch64 ILP32: Go has no ILP32 port; GOARCH=arm64 is LP64 and cgo would mix it with the ILP32 C
+# toolchain. Build pure Go (static LP64 executables, which the LP64 kernel runs) without cgo.
+ifeq ($(CONFIG_AARCH64_ABI_ILP32),y)
+  GO_PKG_CGO_ENABLED:=0
+else
+  GO_PKG_CGO_ENABLED:=1
+endif
+
 GO_PKG_TARGET_VARS= \
 	GOOS="$(GO_OS)" \
 	GOARCH="$(GO_ARCH)" \
@@ -208,7 +216,7 @@ GO_PKG_TARGET_VARS= \
 	GOMIPS="$(GO_MIPS)" \
 	GOMIPS64="$(GO_MIPS64)" \
 	GOPPC64="$(GO_PPC64)" \
-	CGO_ENABLED=1 \
+	CGO_ENABLED=$(GO_PKG_CGO_ENABLED) \
 	CC="$(TARGET_CC)" \
 	CXX="$(TARGET_CXX)" \
 	CGO_CFLAGS="$(filter-out $(GO_CFLAGS_TO_REMOVE),$(TARGET_CFLAGS))" \
