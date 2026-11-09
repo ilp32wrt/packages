@@ -1,0 +1,22 @@
+std: use libc 0.2.191 with AArch64 ILP32 support
+
+The libc crate (https://github.com/rust-lang/libc 0.2.191 plus the AArch64 ILP32 glibc/musl port)
+is unpacked into vendor/libc-0.2.191 by the package Makefile (Download/libc-crate); this points
+the standard library at it.
+
+diff --git a/library/Cargo.lock b/library/Cargo.lock
+index ffa9a6302..942c07934 100644
+--- a/library/Cargo.lock
++++ b/library/Cargo.lock
+@@ -146,9 +146,9 @@ dependencies = [
+ 
+ [[package]]
+ name = "libc"
+-version = "0.2.183"
++version = "0.2.191"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
++checksum = "df0684e089db1c9c721fe133d8c5ce4e14b26c2c6d28d81a09c10c4554266566"
+ dependencies = [
+  "rustc-std-workspace-core",
+ ]

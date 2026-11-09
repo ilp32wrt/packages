@@ -1,0 +1,92 @@
+rustc: add the aarch64-unknown-linux-musl_ilp32 target
+
+Tier 3 target for AArch64 ILP32 with musl 1.2.5 (64-bit time_t); needs the musl_ilp32
+environment in LLVM (0100). Bootstrap: allow the target although stage0 does not know it, and
+take GCC's libgcc_eh.a (found through the target C compiler) as the self-contained libunwind.a,
+since LLVM's libunwind does not support AArch64 ILP32. Dynamically linked programs unwind with
+libgcc_s as on the other musl targets.
+
+diff --git a/compiler/rustc_target/src/spec/mod.rs b/compiler/rustc_target/src/spec/mod.rs
+index 0601f9d7c..13d989158 100644
+--- a/compiler/rustc_target/src/spec/mod.rs
++++ b/compiler/rustc_target/src/spec/mod.rs
+@@ -1771,6 +1771,7 @@ supported_targets! {
+ 
+     ("aarch64_be-unknown-linux-gnu", aarch64_be_unknown_linux_gnu),
+     ("aarch64-unknown-linux-gnu_ilp32", aarch64_unknown_linux_gnu_ilp32),
++    ("aarch64-unknown-linux-musl_ilp32", aarch64_unknown_linux_musl_ilp32),
+     ("aarch64_be-unknown-linux-gnu_ilp32", aarch64_be_unknown_linux_gnu_ilp32),
+ 
+     ("bpfeb-unknown-none", bpfeb_unknown_none),
+diff --git a/compiler/rustc_target/src/spec/targets/aarch64_unknown_linux_musl_ilp32.rs b/compiler/rustc_target/src/spec/targets/aarch64_unknown_linux_musl_ilp32.rs
+new file mode 100644
+index 000000000..e79f60763
+--- /dev/null
++++ b/compiler/rustc_target/src/spec/targets/aarch64_unknown_linux_musl_ilp32.rs
+@@ -0,0 +1,36 @@
++use crate::spec::{
++    Arch, CfgAbi, FramePointer, StackProbeType, Target, TargetMetadata, TargetOptions, base,
++};
++
++pub(crate) fn target() -> Target {
++    let mut base = base::linux_musl::opts();
++    base.max_atomic_width = Some(128);
++    base.features = "+v8a,+outline-atomics".into();
++    base.stack_probes = StackProbeType::Inline;
++    base.cfg_abi = CfgAbi::Ilp32;
++
++    // Like the other musl targets.
++    base.crt_static_default = true;
++
++    Target {
++        // The `musl_ilp32` environment needs an LLVM that knows it (llvm-ilp32).
++        llvm_target: "aarch64-unknown-linux-musl_ilp32".into(),
++        metadata: TargetMetadata {
++            description: Some("ARM64 Linux (ILP32 ABI) with musl 1.2.5".into()),
++            tier: Some(3),
++            host_tools: Some(false),
++            std: Some(true),
++        },
++        pointer_width: 32,
++        data_layout: "e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128-Fn32".into(),
++        arch: Arch::AArch64,
++        options: TargetOptions {
++            // the AAPCS64 expects use of non-leaf frame pointers per
++            // https://github.com/ARM-software/abi-aa/blob/4492d1570eb70c8fd146623e0db65b2d241f12e7/aapcs64/aapcs64.rst#the-frame-pointer
++            // and we tend to encounter interesting bugs in AArch64 unwinding code if we do not
++            frame_pointer: FramePointer::NonLeaf,
++            mcount: "\u{1}_mcount".into(),
++            ..base
++        },
++    }
++}
+diff --git a/src/bootstrap/src/core/build_steps/compile.rs b/src/bootstrap/src/core/build_steps/compile.rs
+index 46d05b9d5..cb5793cfc 100644
+--- a/src/bootstrap/src/core/build_steps/compile.rs
++++ b/src/bootstrap/src/core/build_steps/compile.rs
+@@ -425,7 +425,12 @@ fn copy_self_contained_objects(
+                 );
+             }
+         }
+-        if !target.starts_with("s390x") {
++        if target.starts_with("aarch64") && target.ends_with("_ilp32") {
++            let src = compiler_file(builder, &builder.cc(target), target, CLang::C, "libgcc_eh.a");
++            let libunwind_target = libdir_self_contained.join("libunwind.a");
++            builder.copy_link(&src, &libunwind_target, FileType::NativeLibrary);
++            target_deps.push((libunwind_target, DependencyType::TargetSelfContained));
++        } else if !target.starts_with("s390x") {
+             let libunwind_path = copy_llvm_libunwind(builder, target, &libdir_self_contained);
+             target_deps.push((libunwind_path, DependencyType::TargetSelfContained));
+         }
+diff --git a/src/bootstrap/src/core/sanity.rs b/src/bootstrap/src/core/sanity.rs
+index c4a6b68ae..effdca007 100644
+--- a/src/bootstrap/src/core/sanity.rs
++++ b/src/bootstrap/src/core/sanity.rs
+@@ -37,6 +37,7 @@ pub struct Finder {
+ /// when the newly-bumped stage 0 compiler now knows about the formerly-missing targets.
+ const STAGE0_MISSING_TARGETS: &[&str] = &[
+     // just a dummy comment so the list doesn't get onelined
++    "aarch64-unknown-linux-musl_ilp32",
+     "x86_64-unknown-linux-gnumsan",
+     "x86_64-unknown-linux-gnutsan",
+ ];

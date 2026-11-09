@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=rust
 PKG_VERSION:=1.96.0
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_SOURCE:=rustc-$(PKG_VERSION)-src.tar.xz
 PKG_SOURCE_URL:=https://static.rust-lang.org/dist/
@@ -24,6 +24,20 @@ PKG_BUILD_FLAGS:=no-mips16
 include $(INCLUDE_DIR)/host-build.mk
 include $(INCLUDE_DIR)/package.mk
 include ./rust-values.mk
+
+# std uses libc 0.2.191 with the AArch64 ILP32 glibc/musl port (patches/0103 locks it); the same
+# crate is installed for cargo packages ([patch.crates-io] in rust-package.mk)
+RUST_ILP32_LIBC_VERSION:=0.2.191
+RUST_ILP32_LIBC_CRATE:=libc-$(RUST_ILP32_LIBC_VERSION)-ilp32.crate
+RUST_ILP32_LIBC_HASH:=df0684e089db1c9c721fe133d8c5ce4e14b26c2c6d28d81a09c10c4554266566
+
+define Download/libc-ilp32
+  FILE:=$(RUST_ILP32_LIBC_CRATE)
+  # not published yet: put the file into dl/ for now
+  URL:=https://github.com/ilp32wrt/packages/releases/download/rust-libc-$(RUST_ILP32_LIBC_VERSION)-ilp32
+  HASH:=$(RUST_ILP32_LIBC_HASH)
+endef
+$(eval $(call Download,libc-ilp32))
 
 define Package/rust
   SECTION:=lang
@@ -79,6 +93,13 @@ HOST_CONFIGURE_ARGS = \
 	--set=llvm.download-ci-llvm=false \
 	$(TARGET_CONFIGURE_ARGS)
 
+define Host/Prepare
+	$(call Host/Prepare/Default)
+	tar -xzf $(DL_DIR)/$(RUST_ILP32_LIBC_CRATE) -C $(HOST_BUILD_DIR)/vendor
+	printf '{"files":{},"package":"%s"}' $(RUST_ILP32_LIBC_HASH) \
+		> $(HOST_BUILD_DIR)/vendor/libc-$(RUST_ILP32_LIBC_VERSION)/.cargo-checksum.json
+endef
+
 define Host/Uninstall
 	# Call the Uninstall script
 	[ -f $(RUST_UNINSTALL) ] && \
@@ -104,6 +125,9 @@ define Host/Install
 		find . -mindepth 2 -maxdepth 2 -type f -name install.sh \
 			-execdir bash '{}' --prefix=$(STAGING_DIR)/host --disable-ldconfig \; ; \
 	)
+	$(INSTALL_DIR) $(STAGING_DIR)/host/share/rust-ilp32
+	rm -rf $(STAGING_DIR)/host/share/rust-ilp32/libc-$(RUST_ILP32_LIBC_VERSION)
+	$(CP) $(HOST_BUILD_DIR)/vendor/libc-$(RUST_ILP32_LIBC_VERSION) $(STAGING_DIR)/host/share/rust-ilp32/
 endef
 
 $(eval $(call HostBuild))

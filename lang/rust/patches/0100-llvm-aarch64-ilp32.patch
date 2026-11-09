@@ -1,0 +1,783 @@
+llvm: AArch64 ILP32 (llvm-ilp32 0001-0012)
+
+GNU ILP32 code generation fixes (pointer zero extension at ABI boundaries, FastISel, wrapping
+address offsets, ELF32 .note.gnu.property, widening multiplies), Cortex-A35 tuning and the
+musl_ilp32 environment, from https://github.com/ilp32-a64/llvm-ilp32 (LLVM 22.1.8) applied to
+the bundled LLVM 22.1.2. Test files are left out (not in the rustc source tarball).
+
+diff --git a/src/llvm-project/clang/lib/Basic/Targets/AArch64.cpp b/src/llvm-project/clang/lib/Basic/Targets/AArch64.cpp
+index d148705a3..d30e3f020 100644
+--- a/src/llvm-project/clang/lib/Basic/Targets/AArch64.cpp
++++ b/src/llvm-project/clang/lib/Basic/Targets/AArch64.cpp
+@@ -135,8 +135,16 @@ AArch64TargetInfo::AArch64TargetInfo(const llvm::Triple &Triple,
+     if (!getTriple().isOSDarwin() && !getTriple().isOSNetBSD())
+       WCharType = UnsignedInt;
+ 
+-    Int64Type = SignedLong;
+-    IntMaxType = SignedLong;
++    if (getTriple().isILP32Environment()) {
++      // Match GCC -mabi=ilp32: long is 32-bit, int64_t is long long and
++      // intptr_t is int.
++      Int64Type = SignedLongLong;
++      IntMaxType = SignedLongLong;
++      IntPtrType = SignedInt;
++    } else {
++      Int64Type = SignedLong;
++      IntMaxType = SignedLong;
++    }
+   }
+ 
+   AddrSpaceMap = &ARM64AddrSpaceMap;
+@@ -147,7 +155,7 @@ AArch64TargetInfo::AArch64TargetInfo(const llvm::Triple &Triple,
+   HasFloat16 = true;
+   HasStrictFP = true;
+ 
+-  if (Triple.isArch64Bit())
++  if (Triple.isArch64Bit() && !getTriple().isILP32Environment())
+     LongWidth = LongAlign = PointerWidth = PointerAlign = 64;
+   else
+     LongWidth = LongAlign = PointerWidth = PointerAlign = 32;
+diff --git a/src/llvm-project/clang/lib/Driver/Driver.cpp b/src/llvm-project/clang/lib/Driver/Driver.cpp
+index eb3f9cbea..390220ba6 100644
+--- a/src/llvm-project/clang/lib/Driver/Driver.cpp
++++ b/src/llvm-project/clang/lib/Driver/Driver.cpp
+@@ -791,6 +791,26 @@ static llvm::Triple computeTargetTriple(const Driver &D,
+     }
+   }
+ 
++  // If target is AArch64 Linux (glibc or musl) adjust the target triple
++  // according to the provided ABI name, as GCC does for -mabi=ilp32 and
++  // -mabi=lp64.
++  if ((Target.getArch() == llvm::Triple::aarch64 ||
++       Target.getArch() == llvm::Triple::aarch64_be) &&
++      Target.isOSLinux()) {
++    if ((A = Args.getLastArgNoClaim(options::OPT_mabi_EQ))) {
++      StringRef ABIName = A->getValue();
++      llvm::Triple::EnvironmentType Env = Target.getEnvironment();
++      if (ABIName == "ilp32" && Env == llvm::Triple::GNU)
++        Target.setEnvironment(llvm::Triple::GNUILP32);
++      else if (ABIName == "ilp32" && Env == llvm::Triple::Musl)
++        Target.setEnvironment(llvm::Triple::MuslILP32);
++      else if (ABIName == "lp64" && Env == llvm::Triple::GNUILP32)
++        Target.setEnvironment(llvm::Triple::GNU);
++      else if (ABIName == "lp64" && Env == llvm::Triple::MuslILP32)
++        Target.setEnvironment(llvm::Triple::Musl);
++    }
++  }
++
+   // If target is RISC-V adjust the target triple according to
+   // provided architecture name
+   if (Target.isRISCV()) {
+diff --git a/src/llvm-project/clang/lib/Driver/ToolChains/Clang.cpp b/src/llvm-project/clang/lib/Driver/ToolChains/Clang.cpp
+index 18933cb8a..cc1988921 100644
+--- a/src/llvm-project/clang/lib/Driver/ToolChains/Clang.cpp
++++ b/src/llvm-project/clang/lib/Driver/ToolChains/Clang.cpp
+@@ -1605,9 +1605,12 @@ namespace {
+ void RenderAArch64ABI(const llvm::Triple &Triple, const ArgList &Args,
+                       ArgStringList &CmdArgs) {
+   const char *ABIName = nullptr;
+-  if (Arg *A = Args.getLastArg(options::OPT_mabi_EQ))
++  if (Arg *A = Args.getLastArg(options::OPT_mabi_EQ)) {
+     ABIName = A->getValue();
+-  else if (Triple.isOSDarwin())
++    // -mabi=ilp32 and -mabi=lp64 have already selected the triple.
++    if (StringRef(ABIName) == "ilp32" || StringRef(ABIName) == "lp64")
++      ABIName = "aapcs";
++  } else if (Triple.isOSDarwin())
+     ABIName = "darwinpcs";
+   // TODO: we probably want to have some target hook here.
+   else if (Triple.isOSLinux() &&
+diff --git a/src/llvm-project/clang/lib/Driver/ToolChains/CommonArgs.cpp b/src/llvm-project/clang/lib/Driver/ToolChains/CommonArgs.cpp
+index 10a1a412e..1d75eb818 100644
+--- a/src/llvm-project/clang/lib/Driver/ToolChains/CommonArgs.cpp
++++ b/src/llvm-project/clang/lib/Driver/ToolChains/CommonArgs.cpp
+@@ -576,10 +576,14 @@ const char *tools::getLDMOption(const llvm::Triple &T, const ArgList &Args) {
+       return "aarch64managarm";
+     else if (aarch64::isAArch64BareMetal(T))
+       return "aarch64elf";
++    if (T.isILP32Environment())
++      return "aarch64linux32";
+     return "aarch64linux";
+   case llvm::Triple::aarch64_be:
+     if (aarch64::isAArch64BareMetal(T))
+       return "aarch64elfb";
++    if (T.isILP32Environment())
++      return "aarch64linux32b";
+     return "aarch64linuxb";
+   case llvm::Triple::arm:
+   case llvm::Triple::thumb:
+diff --git a/src/llvm-project/clang/lib/Driver/ToolChains/Linux.cpp b/src/llvm-project/clang/lib/Driver/ToolChains/Linux.cpp
+index d525b417b..90f10a363 100644
+--- a/src/llvm-project/clang/lib/Driver/ToolChains/Linux.cpp
++++ b/src/llvm-project/clang/lib/Driver/ToolChains/Linux.cpp
+@@ -88,8 +88,12 @@ std::string Linux::getMultiarchTriple(const Driver &D,
+     if (hasEffectiveTriple() &&
+         getEffectiveTriple().getEnvironment() == llvm::Triple::PAuthTest)
+       return "aarch64-linux-pauthtest";
++    if (TargetEnvironment == llvm::Triple::GNUILP32)
++      return "aarch64-linux-gnu_ilp32";
+     return "aarch64-linux-gnu";
+   case llvm::Triple::aarch64_be:
++    if (TargetEnvironment == llvm::Triple::GNUILP32)
++      return "aarch64_be-linux-gnu_ilp32";
+     return "aarch64_be-linux-gnu";
+ 
+   case llvm::Triple::loongarch64: {
+@@ -203,6 +207,10 @@ static StringRef getOSLibDir(const llvm::Triple &Triple, const ArgList &Args) {
+   if (Triple.getArch() == llvm::Triple::x86_64 && Triple.isX32())
+     return "libx32";
+ 
++  if (Triple.isAArch64() &&
++      Triple.getEnvironment() == llvm::Triple::GNUILP32)
++    return "libilp32";
++
+   if (Triple.getArch() == llvm::Triple::riscv32)
+     return "lib32";
+ 
+@@ -602,6 +610,8 @@ std::string Linux::getDynamicLinker(const ArgList &Args) const {
+     if (Arch == llvm::Triple::ppc &&
+         Triple.getSubArch() == llvm::Triple::PPCSubArch_spe)
+       ArchName = "powerpc-sf";
++    if (Triple.isILP32Environment())
++      ArchName += "_ilp32";
+ 
+     return "/lib/ld-musl-" + ArchName + ".so.1";
+   }
+@@ -615,11 +625,15 @@ std::string Linux::getDynamicLinker(const ArgList &Args) const {
+ 
+   case llvm::Triple::aarch64:
+     LibDir = "lib";
+-    Loader = "ld-linux-aarch64.so.1";
++    Loader = Triple.getEnvironment() == llvm::Triple::GNUILP32
++                 ? "ld-linux-aarch64_ilp32.so.1"
++                 : "ld-linux-aarch64.so.1";
+     break;
+   case llvm::Triple::aarch64_be:
+     LibDir = "lib";
+-    Loader = "ld-linux-aarch64_be.so.1";
++    Loader = Triple.getEnvironment() == llvm::Triple::GNUILP32
++                 ? "ld-linux-aarch64_be_ilp32.so.1"
++                 : "ld-linux-aarch64_be.so.1";
+     break;
+   case llvm::Triple::arm:
+   case llvm::Triple::thumb:
+diff --git a/src/llvm-project/llvm/include/llvm/CodeGen/TargetLowering.h b/src/llvm-project/llvm/include/llvm/CodeGen/TargetLowering.h
+index 1df4ba582..a7c98faf5 100644
+--- a/src/llvm-project/llvm/include/llvm/CodeGen/TargetLowering.h
++++ b/src/llvm-project/llvm/include/llvm/CodeGen/TargetLowering.h
+@@ -973,6 +973,15 @@ public:
+   /// promotedInst1(...(promotedInstN(ext(load)))).
+   bool enableExtLdPromotion() const { return EnableExtLdPromotion; }
+ 
++  /// Return true if extension promotion in CodeGenPrepare should keep an
++  /// extension that is an operand of a widening multiply, i.e. of a multiply
++  /// whose other operand is an extension of the same kind from a type no
++  /// wider than the source type of this one, or a constant that fits in that
++  /// type. On targets that select mul(ext(a), ext(b)) as one widening
++  /// multiply, moving the extension above the operation that defines a would
++  /// turn it into a full-width multiply.
++  virtual bool preferWideningMulOverExtPromotion() const { return false; }
++
+   /// Return true if the target can combine store(extractelement VectorTy,
+   /// Idx).
+   /// \p Cost[out] gives the cost of that transformation when this is true.
+diff --git a/src/llvm-project/llvm/include/llvm/TargetParser/Triple.h b/src/llvm-project/llvm/include/llvm/TargetParser/Triple.h
+index 9c83abeeb..026fdbaed 100644
+--- a/src/llvm-project/llvm/include/llvm/TargetParser/Triple.h
++++ b/src/llvm-project/llvm/include/llvm/TargetParser/Triple.h
+@@ -282,6 +282,7 @@ public:
+     MuslF32,
+     MuslSF,
+     MuslX32,
++    MuslILP32,
+     MuslWALI,
+     LLVM,
+ 
+@@ -867,6 +868,7 @@ public:
+            getEnvironment() == Triple::MuslF32 ||
+            getEnvironment() == Triple::MuslSF ||
+            getEnvironment() == Triple::MuslX32 ||
++           getEnvironment() == Triple::MuslILP32 ||
+            getEnvironment() == Triple::MuslWALI ||
+            getEnvironment() == Triple::OpenHOS || isOSLiteOS();
+   }
+@@ -1041,8 +1043,7 @@ public:
+     assert(PointerWidth == 64 || PointerWidth == 32);
+     if (!isAArch64())
+       return false;
+-    return getArch() == Triple::aarch64_32 ||
+-                   getEnvironment() == Triple::GNUILP32
++    return getArch() == Triple::aarch64_32 || isILP32Environment()
+                ? PointerWidth == 32
+                : PointerWidth == 64;
+   }
+@@ -1177,6 +1178,13 @@ public:
+     return Env == Triple::GNUX32 || Env == Triple::MuslX32;
+   }
+ 
++  /// Tests whether the target uses the AArch64 Linux ILP32 ABI (32-bit long
++  /// and pointers, as GCC's -mabi=ilp32), with glibc or musl.
++  bool isILP32Environment() const {
++    EnvironmentType Env = getEnvironment();
++    return Env == Triple::GNUILP32 || Env == Triple::MuslILP32;
++  }
++
+   /// Tests whether the target is eBPF.
+   bool isBPF() const {
+     return getArch() == Triple::bpfel || getArch() == Triple::bpfeb;
+diff --git a/src/llvm-project/llvm/lib/CodeGen/CodeGenPrepare.cpp b/src/llvm-project/llvm/lib/CodeGen/CodeGenPrepare.cpp
+index 6161f7818..2db4bc801 100644
+--- a/src/llvm-project/llvm/lib/CodeGen/CodeGenPrepare.cpp
++++ b/src/llvm-project/llvm/lib/CodeGen/CodeGenPrepare.cpp
+@@ -163,6 +163,11 @@ static cl::opt<bool> StressStoreExtract(
+     "stress-cgp-store-extract", cl::Hidden, cl::init(false),
+     cl::desc("Stress test store(extract) optimizations in CodeGenPrepare"));
+ 
++static cl::opt<bool> KeepWideningMulExt(
++    "cgp-keep-widening-mul-ext", cl::Hidden, cl::init(true),
++    cl::desc("Do not promote an extension that is an operand of a widening "
++             "multiply, on targets that prefer widening multiplies"));
++
+ static cl::opt<bool> DisableExtLdPromotion(
+     "disable-cgp-ext-ld-promotion", cl::Hidden, cl::init(false),
+     cl::desc("Disable ext(promotable(ld)) -> promoted(ext(ld)) optimization in "
+@@ -6598,6 +6603,30 @@ bool CodeGenPrepare::optimizeInlineAsmInst(CallInst *CS) {
+   return MadeChange;
+ }
+ 
++/// Check if the extension \p Ext is an operand of a widening multiply: a
++/// multiply whose other operand is an extension of the same kind from a type
++/// no wider than the source type of \p Ext, or a constant that fits in it.
++static bool isWideningMulOperand(const Instruction *Ext) {
++  bool IsSExt = isa<SExtInst>(Ext);
++  unsigned SrcBits = Ext->getOperand(0)->getType()->getScalarSizeInBits();
++  for (const User *U : Ext->users()) {
++    const auto *Mul = dyn_cast<BinaryOperator>(U);
++    if (!Mul || Mul->getOpcode() != Instruction::Mul)
++      continue;
++    const Value *Other =
++        Mul->getOperand(0) == Ext ? Mul->getOperand(1) : Mul->getOperand(0);
++    if (const auto *OtherExt = dyn_cast<CastInst>(Other))
++      if ((IsSExt ? isa<SExtInst>(OtherExt) : isa<ZExtInst>(OtherExt)) &&
++          OtherExt->getSrcTy()->getScalarSizeInBits() <= SrcBits)
++        return true;
++    if (const auto *C = dyn_cast<ConstantInt>(Other))
++      if (IsSExt ? C->getValue().isSignedIntN(SrcBits)
++                 : C->getValue().isIntN(SrcBits))
++        return true;
++  }
++  return false;
++}
++
+ /// Check if all the uses of \p Val are equivalent (or free) zero or
+ /// sign extensions.
+ static bool hasSameExtUse(Value *Val, const TargetLowering &TLI) {
+@@ -6674,6 +6703,16 @@ bool CodeGenPrepare::tryToPromoteExts(
+     if (!TLI->enableExtLdPromotion() || DisableExtLdPromotion)
+       return false;
+ 
++    // Keep an extension that feeds a widening multiply where it is: moving
++    // it above its (nsw/nuw) operand would make the multiply full width
++    // (e.g. on AArch64 a 64-bit MADD instead of SMADDL), which costs more
++    // than the extension that merging into a load could save.
++    if (KeepWideningMulExt && TLI->preferWideningMulOverExtPromotion() &&
++        isWideningMulOperand(I)) {
++      ProfitablyMovedExts.push_back(I);
++      continue;
++    }
++
+     // Get the action to perform the promotion.
+     TypePromotionHelper::Action TPH =
+         TypePromotionHelper::getAction(I, InsertedInsts, *TLI, PromotedInsts);
+diff --git a/src/llvm-project/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp b/src/llvm-project/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp
+index e68339bd9..437cc59ba 100644
+--- a/src/llvm-project/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp
++++ b/src/llvm-project/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp
+@@ -1788,11 +1788,36 @@ SDValue SelectionDAGBuilder::getCopyFromRegs(const Value *V, Type *Ty) {
+     Result = RFV.getCopyFromRegs(DAG, FuncInfo, getCurSDLoc(), Chain, nullptr,
+                                  V);
+     resolveDanglingDebugInfo(V, Result);
++    Result = assertPointerZeroExtended(V, Ty, Result);
+   }
+ 
+   return Result;
+ }
+ 
++/// A pointer in the default address space whose memory type is narrower than
++/// its register type (32-bit pointers in 64-bit registers) is kept
++/// zero-extended in registers: loads, arguments, call results, non-inbounds
++/// GEPs and inttoptr all extend it. Record that for a pointer copied from
++/// another block. Inline assembly may leave the upper bits undefined; other
++/// address spaces may extend differently; at -O0 nothing would use it.
++SDValue SelectionDAGBuilder::assertPointerZeroExtended(const Value *V, Type *Ty,
++                                                      SDValue Val) {
++  if (!Val || !Ty->isPointerTy() || Ty->getPointerAddressSpace() != 0 ||
++      Val.getOpcode() == ISD::AssertZext || isa<ConstantSDNode>(Val) ||
++      DAG.getOptLevel() == CodeGenOptLevel::None)
++    return Val;
++  if (const auto *CB = dyn_cast<CallBase>(V); CB && CB->isInlineAsm())
++    return Val;
++  const TargetLowering &TLI = DAG.getTargetLoweringInfo();
++  EVT MemVT =
++      TLI.getPointerMemTy(DAG.getDataLayout(), Ty->getPointerAddressSpace());
++  EVT VT = Val.getValueType();
++  if (!VT.isScalarInteger() || !MemVT.isScalarInteger() || !MemVT.bitsLT(VT))
++    return Val;
++  return DAG.getNode(ISD::AssertZext, getCurSDLoc(), VT, Val,
++                     DAG.getValueType(MemVT));
++}
++
+ /// getValue - Return an SDValue for the given Value.
+ SDValue SelectionDAGBuilder::getValue(const Value *V) {
+   // If we already have an SDValue for this value, use it. It's important
+diff --git a/src/llvm-project/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.h b/src/llvm-project/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.h
+index 6f3e7a63b..0500f1af9 100644
+--- a/src/llvm-project/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.h
++++ b/src/llvm-project/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.h
+@@ -344,6 +344,8 @@ public:
+   /// of the specified type Ty. Return empty SDValue() otherwise.
+   SDValue getCopyFromRegs(const Value *V, Type *Ty);
+ 
++  SDValue assertPointerZeroExtended(const Value *V, Type *Ty, SDValue Val);
++
+   /// Register a dbg_value which relies on a Value which we have not yet seen.
+   void addDanglingDebugInfo(SmallVectorImpl<Value *> &Values,
+                             DILocalVariable *Var, DIExpression *Expr,
+diff --git a/src/llvm-project/llvm/lib/CodeGen/TargetLoweringObjectFileImpl.cpp b/src/llvm-project/llvm/lib/CodeGen/TargetLoweringObjectFileImpl.cpp
+index 6bbad68c2..7de3d6c37 100644
+--- a/src/llvm-project/llvm/lib/CodeGen/TargetLoweringObjectFileImpl.cpp
++++ b/src/llvm-project/llvm/lib/CodeGen/TargetLoweringObjectFileImpl.cpp
+@@ -190,7 +190,7 @@ void TargetLoweringObjectFileELF::Initialize(MCContext &Ctx,
+     //
+     // Use DW_EH_PE_indirect even for -fno-pic to avoid copy relocations.
+     LSDAEncoding = dwarf::DW_EH_PE_pcrel |
+-                   (TgtM.getTargetTriple().getEnvironment() == Triple::GNUILP32
++                   (TgtM.getTargetTriple().isILP32Environment()
+                         ? dwarf::DW_EH_PE_sdata4
+                         : dwarf::DW_EH_PE_sdata8);
+     PersonalityEncoding = LSDAEncoding | dwarf::DW_EH_PE_indirect;
+diff --git a/src/llvm-project/llvm/lib/Target/AArch64/AArch64FastISel.cpp b/src/llvm-project/llvm/lib/Target/AArch64/AArch64FastISel.cpp
+index 0246c7454..a12583dc1 100644
+--- a/src/llvm-project/llvm/lib/Target/AArch64/AArch64FastISel.cpp
++++ b/src/llvm-project/llvm/lib/Target/AArch64/AArch64FastISel.cpp
+@@ -2898,6 +2898,11 @@ bool AArch64FastISel::fastLowerArguments() {
+   if (!FuncInfo.CanLowerReturn)
+     return false;
+ 
++  // GNU ILP32 pointer arguments must be zero-extended by the callee; leave
++  // that to SelectionDAG.
++  if (Subtarget->isTargetGNUILP32())
++    return false;
++
+   const Function *F = FuncInfo.Fn;
+   if (F->isVarArg())
+     return false;
+diff --git a/src/llvm-project/llvm/lib/Target/AArch64/AArch64ISelLowering.cpp b/src/llvm-project/llvm/lib/Target/AArch64/AArch64ISelLowering.cpp
+index a55b1facb..5b2fc4cc9 100644
+--- a/src/llvm-project/llvm/lib/Target/AArch64/AArch64ISelLowering.cpp
++++ b/src/llvm-project/llvm/lib/Target/AArch64/AArch64ISelLowering.cpp
+@@ -125,6 +125,12 @@ EnableOptimizeLogicalImm("aarch64-enable-logical-imm", cl::Hidden,
+                                   "optimization"),
+                          cl::init(true));
+ 
++static cl::opt<bool> FoldILP32AddressOffsets(
++    "aarch64-ilp32-fold-address-offsets", cl::Hidden, cl::init(true),
++    cl::desc("GNU ILP32: fold constant offsets of less than a page into the "
++             "address of a load or store even if the 32-bit address "
++             "computation may wrap"));
++
+ // Temporary option added for the purpose of testing functionality added
+ // to DAGCombiner.cpp in D92230. It is expected that this can be removed
+ // in future when both implementations will be based off MGATHER rather
+@@ -8528,6 +8534,34 @@ SDValue AArch64TargetLowering::lowerEHPadEntry(SDValue Chain, SDLoc const &DL,
+   return Chain;
+ }
+ 
++/// GNU ILP32 pointers from code we did not compile may carry garbage in the
++/// upper 32 bits. A local function whose address is not taken is only called
++/// from this module, where pointers are always kept zero-extended.
++static bool hasOnlyLocalCallers(const Function &F) {
++  return F.hasLocalLinkage() && !F.hasAddressTaken();
++}
++
++/// Whether GCC-compiled code can be on the other side of a call with this
++/// calling convention. GCC implements none of LLVM's own conventions for
++/// AArch64 (it ignores preserve_none, preserve_most and preserve_all), so
++/// pointers passed or returned with them always come from LLVM-compiled code.
++static bool mayInteroperateWithGCC(CallingConv::ID CC) {
++  switch (CC) {
++  case CallingConv::Fast:
++  case CallingConv::Cold:
++  case CallingConv::GHC:
++  case CallingConv::Tail:
++  case CallingConv::PreserveMost:
++  case CallingConv::PreserveAll:
++  case CallingConv::PreserveNone:
++  case CallingConv::Swift:
++  case CallingConv::SwiftTail:
++    return false;
++  default:
++    return true;
++  }
++}
++
+ SDValue AArch64TargetLowering::LowerFormalArguments(
+     SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
+     const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &DL,
+@@ -8799,7 +8833,10 @@ SDValue AArch64TargetLowering::LowerFormalArguments(
+         }
+       }
+     } else {
+-      if (Subtarget->isTargetILP32() && Ins[i].Flags.isPointer())
++      if (Subtarget->isTargetGNUILP32() && Ins[i].Flags.isPointer() &&
++          mayInteroperateWithGCC(CallConv) && !hasOnlyLocalCallers(F))
++        ArgValue = DAG.getZeroExtendInReg(ArgValue, DL, MVT::i32);
++      else if (Subtarget->isTargetILP32() && Ins[i].Flags.isPointer())
+         ArgValue = DAG.getNode(ISD::AssertZext, DL, ArgValue.getValueType(),
+                                ArgValue, DAG.getValueType(MVT::i32));
+ 
+@@ -10370,6 +10407,19 @@ AArch64TargetLowering::LowerCall(CallLoweringInfo &CLI,
+       Chain, InGlue, CallConv, IsVarArg, RVLocs, DL, DAG, InVals, IsThisReturn,
+       IsThisReturn ? OutVals[0] : SDValue(), RequiresSMChange);
+ 
++  // A GNU ILP32 callee may return a pointer with garbage in the upper 32 bits,
++  // unless it is a local function compiled here or uses a calling convention
++  // that GCC does not implement.
++  const Function *CalledFn = CLI.CB ? CLI.CB->getCalledFunction() : nullptr;
++  if (Subtarget->isTargetGNUILP32() && mayInteroperateWithGCC(CallConv) &&
++      !(CalledFn && CalledFn->hasLocalLinkage() &&
++        !CalledFn->isDeclaration())) {
++    assert(InVals.size() == Ins.size() && "unexpected call result split");
++    for (unsigned I = IsThisReturn ? 1 : 0, E = InVals.size(); I != E; ++I)
++      if (Ins[I].Flags.isPointer())
++        InVals[I] = DAG.getZeroExtendInReg(InVals[I], DL, MVT::i32);
++  }
++
+   if (!Ins.empty())
+     InGlue = Result.getValue(Result->getNumValues() - 1);
+ 
+@@ -24892,6 +24942,99 @@ static SDValue combineV3I8LoadExt(LoadSDNode *LD, SelectionDAG &DAG) {
+   return DAG.getMergeValues({Extract, TokenFactor}, DL);
+ }
+ 
++/// Whether a 32-bit value is produced by an instruction that writes a W
++/// register, so that zero-extending it to 64 bits is free (as isDef32 in
++/// AArch64ISelDAGToDAG.cpp).
++static bool isDef32(SDValue N) {
++  unsigned Opc = N.getOpcode();
++  return N.getValueType() == MVT::i32 && Opc != ISD::TRUNCATE &&
++         Opc != TargetOpcode::EXTRACT_SUBREG && Opc != ISD::CopyFromReg &&
++         Opc != ISD::AssertSext && Opc != ISD::AssertZext &&
++         Opc != ISD::AssertAlign && Opc != ISD::FREEZE;
++}
++
++/// Whether every use of Ptr is as the address of a simple load or store.
++static bool isOnlyUsedAsAddress(SDValue Ptr) {
++  for (SDUse &U : Ptr->uses()) {
++    auto *Mem = dyn_cast<LSBaseSDNode>(U.getUser());
++    if (!Mem || !Mem->isSimple() || !Mem->isUnindexed() ||
++        U.getOperandNo() != (isa<StoreSDNode>(Mem) ? 2u : 1u))
++      return false;
++  }
++  return true;
++}
++
++/// GNU ILP32 on Linux: a load or store address computed modulo 2^32,
++/// zext(Base + C1) + C2, is replaced by zext(Base) + (C1 + C2), which the
++/// addressing modes can absorb, when C1 and C2 are constants that do not have
++/// opposite signs and |C1 + C2| is less than a page. C2, usually 0, is added
++/// after the extension, e.g. by load narrowing. The two addresses differ only
++/// when Base is within |C1| of 0 or 2^32: for C1 > 0 both are unmapped (the
++/// first page, and the space above the 4 GiB address space of an ILP32
++/// process), so both accesses fault; for C1 < 0 Base is in the first page and
++/// not a valid pointer. GCC folds such offsets the same way.
++static SDValue foldILP32AddressOffset(SDNode *N,
++                                      TargetLowering::DAGCombinerInfo &DCI,
++                                      SelectionDAG &DAG,
++                                      const AArch64Subtarget *Subtarget) {
++  if (!FoldILP32AddressOffsets || !Subtarget->isTargetGNUILP32() ||
++      !Subtarget->isTargetLinux())
++    return SDValue();
++  auto *Mem = cast<LSBaseSDNode>(N);
++  if (!Mem->isSimple() || !Mem->isUnindexed())
++    return SDValue();
++  SDValue Ptr = Mem->getBasePtr();
++  SDValue Ext = Ptr;
++  int64_t OuterOffset = 0;
++  if (DAG.isBaseWithConstantOffset(Ptr)) {
++    Ext = Ptr.getOperand(0);
++    OuterOffset = cast<ConstantSDNode>(Ptr.getOperand(1))->getSExtValue();
++  }
++  if (Ext.getOpcode() != ISD::ZERO_EXTEND || Ext.getValueType() != MVT::i64)
++    return SDValue();
++  SDValue Addr = Ext.getOperand(0);
++  if (Addr.getValueType() != MVT::i32 || !DAG.isBaseWithConstantOffset(Addr))
++    return SDValue();
++  int64_t InnerOffset =
++      cast<ConstantSDNode>(Addr.getOperand(1))->getSExtValue();
++  if (OuterOffset <= -4096 || OuterOffset >= 4096 ||
++      (InnerOffset < 0 && OuterOffset > 0) ||
++      (InnerOffset > 0 && OuterOffset < 0))
++    return SDValue();
++  int64_t Offset = InnerOffset + OuterOffset;
++  if (Offset <= -4096 || Offset >= 4096)
++    return SDValue();
++
++  SDLoc DL(N);
++  SDValue Base = Addr.getOperand(0);
++  SDValue Base64;
++  if (Base.getOpcode() == ISD::TRUNCATE &&
++      Base.getOperand(0).getValueType() == MVT::i64 &&
++      DAG.computeKnownBits(Base.getOperand(0)).countMinLeadingZeros() >= 32)
++    Base64 = Base.getOperand(0);
++  else if (isDef32(Base) ||
++           (Addr.hasOneUse() && (Ext == Ptr || Ext.hasOneUse()) &&
++            isOnlyUsedAsAddress(Ptr)))
++    // Free, or paid for by the 32-bit address computation that goes away.
++    Base64 = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i64, Base);
++  else
++    return SDValue();
++  SDValue NewPtr = DAG.getNode(ISD::ADD, DL, MVT::i64, Base64,
++                               DAG.getSignedConstant(Offset, DL, MVT::i64));
++
++  if (auto *LD = dyn_cast<LoadSDNode>(N)) {
++    SDValue NewLD = DAG.getLoad(ISD::UNINDEXED, LD->getExtensionType(),
++                                LD->getValueType(0), DL, LD->getChain(), NewPtr,
++                                LD->getOffset(), LD->getMemoryVT(),
++                                LD->getMemOperand());
++    return DCI.CombineTo(N, NewLD, NewLD.getValue(1));
++  }
++  auto *ST = cast<StoreSDNode>(N);
++  return DAG.getStore(ST->getChain(), DL, ST->getValue(), NewPtr,
++                      ST->getOffset(), ST->getMemoryVT(), ST->getMemOperand(),
++                      ISD::UNINDEXED, ST->isTruncatingStore());
++}
++
+ // Perform TBI simplification if supported by the target and try to break up
+ // nontemporal loads larger than 256-bits loads for odd types so LDNPQ 256-bit
+ // load instructions can be selected.
+@@ -28498,8 +28641,12 @@ SDValue AArch64TargetLowering::PerformDAGCombine(SDNode *N,
+   case ISD::SETCC:
+     return performSETCCCombine(N, DCI, DAG);
+   case ISD::LOAD:
++    if (SDValue Res = foldILP32AddressOffset(N, DCI, DAG, Subtarget))
++      return Res;
+     return performLOADCombine(N, DCI, DAG, Subtarget);
+   case ISD::STORE:
++    if (SDValue Res = foldILP32AddressOffset(N, DCI, DAG, Subtarget))
++      return Res;
+     return performSTORECombine(N, DCI, DAG, Subtarget);
+   case ISD::MSTORE:
+     return performMSTORECombine(N, DCI, DAG, Subtarget);
+diff --git a/src/llvm-project/llvm/lib/Target/AArch64/AArch64ISelLowering.h b/src/llvm-project/llvm/lib/Target/AArch64/AArch64ISelLowering.h
+index 258651261..acc532386 100644
+--- a/src/llvm-project/llvm/lib/Target/AArch64/AArch64ISelLowering.h
++++ b/src/llvm-project/llvm/lib/Target/AArch64/AArch64ISelLowering.h
+@@ -221,6 +221,10 @@ public:
+   bool isProfitableToHoist(Instruction *I) const override;
+ 
+   bool isZExtFree(Type *Ty1, Type *Ty2) const override;
++
++  /// mul(sext/zext i32, sext/zext i32) is SMULL/UMULL (SMADDL/UMADDL with an
++  /// add), cheaper than a 64-bit MUL/MADD on many cores.
++  bool preferWideningMulOverExtPromotion() const override { return true; }
+   bool isZExtFree(EVT VT1, EVT VT2) const override;
+   bool isZExtFree(SDValue Val, EVT VT2) const override;
+ 
+diff --git a/src/llvm-project/llvm/lib/Target/AArch64/AArch64Processors.td b/src/llvm-project/llvm/lib/Target/AArch64/AArch64Processors.td
+index 6f38673c5..a27126121 100644
+--- a/src/llvm-project/llvm/lib/Target/AArch64/AArch64Processors.td
++++ b/src/llvm-project/llvm/lib/Target/AArch64/AArch64Processors.td
+@@ -14,8 +14,15 @@
+ //===----------------------------------------------------------------------===//
+ 
+ 
++// GCC tunes the Cortex-A35 as the Cortex-A53 (same fusions and pipeline model)
++// apart from the issue rate, which is part of the scheduling model here.
+ def TuneA35     : SubtargetFeature<"a35", "ARMProcFamily", "CortexA35",
+-                                "Cortex-A35 ARM processors">;
++                                   "Cortex-A35 ARM processors", [
++                                   FeatureFuseAES,
++                                   FeatureFuseAdrpAdd,
++                                   FeatureBalanceFPOps,
++                                   FeaturePostRAScheduler,
++                                   FeatureUseWzrToVecMove]>;
+ 
+ def TuneA320 : SubtargetFeature<"a320", "ARMProcFamily", "CortexA320",
+                                    "Cortex-A320 ARM processors", [
+diff --git a/src/llvm-project/llvm/lib/Target/AArch64/AArch64Subtarget.h b/src/llvm-project/llvm/lib/Target/AArch64/AArch64Subtarget.h
+index bd8a2d523..e3f735e41 100644
+--- a/src/llvm-project/llvm/lib/Target/AArch64/AArch64Subtarget.h
++++ b/src/llvm-project/llvm/lib/Target/AArch64/AArch64Subtarget.h
+@@ -316,10 +316,15 @@ public:
+   bool isTargetMachO() const { return TargetTriple.isOSBinFormatMachO(); }
+ 
+   bool isTargetILP32() const {
+-    return TargetTriple.isArch32Bit() ||
+-           TargetTriple.getEnvironment() == Triple::GNUILP32;
++    return TargetTriple.isArch32Bit() || TargetTriple.isILP32Environment();
+   }
+ 
++  /// The GNU ILP32 ABI (aarch64-*-linux-gnu_ilp32 and -musl_ilp32) follows
++  /// AAPCS64: the upper 32 bits of a pointer passed or returned in a 64-bit
++  /// register (or 8-byte stack slot) are unspecified and the receiver
++  /// zero-extends it. arm64_32 has the producer do that instead.
++  bool isTargetGNUILP32() const { return TargetTriple.isILP32Environment(); }
++
+   bool useAA() const override;
+ 
+   bool addrSinkUsingGEPs() const override {
+diff --git a/src/llvm-project/llvm/lib/Target/AArch64/AArch64TargetMachine.cpp b/src/llvm-project/llvm/lib/Target/AArch64/AArch64TargetMachine.cpp
+index 1ec5a20cc..cd7f943e6 100644
+--- a/src/llvm-project/llvm/lib/Target/AArch64/AArch64TargetMachine.cpp
++++ b/src/llvm-project/llvm/lib/Target/AArch64/AArch64TargetMachine.cpp
+@@ -384,7 +384,7 @@ AArch64TargetMachine::AArch64TargetMachine(const Target &T, const Triple &TT,
+   // MachO/CodeModel::Large, which GlobalISel does not support.
+   if (static_cast<int>(getOptLevel()) <= EnableGlobalISelAtO &&
+       TT.getArch() != Triple::aarch64_32 &&
+-      TT.getEnvironment() != Triple::GNUILP32 &&
++      !TT.isILP32Environment() &&
+       !(getCodeModel() == CodeModel::Large && TT.isOSBinFormatMachO())) {
+     setGlobalISel(true);
+     setGlobalISelAbort(GlobalISelAbortMode::Disable);
+diff --git a/src/llvm-project/llvm/lib/Target/AArch64/AsmParser/AArch64AsmParser.cpp b/src/llvm-project/llvm/lib/Target/AArch64/AsmParser/AArch64AsmParser.cpp
+index 5ef3e2e50..b0c2aa05b 100644
+--- a/src/llvm-project/llvm/lib/Target/AArch64/AsmParser/AArch64AsmParser.cpp
++++ b/src/llvm-project/llvm/lib/Target/AArch64/AsmParser/AArch64AsmParser.cpp
+@@ -312,7 +312,7 @@ public:
+   AArch64AsmParser(const MCSubtargetInfo &STI, MCAsmParser &Parser,
+                    const MCInstrInfo &MII, const MCTargetOptions &Options)
+     : MCTargetAsmParser(Options, STI, MII) {
+-    IsILP32 = STI.getTargetTriple().getEnvironment() == Triple::GNUILP32;
++    IsILP32 = STI.getTargetTriple().isILP32Environment();
+     IsWindowsArm64EC = STI.getTargetTriple().isWindowsArm64EC();
+     MCAsmParserExtension::Initialize(Parser);
+     MCStreamer &S = getParser().getStreamer();
+diff --git a/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64AsmBackend.cpp b/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64AsmBackend.cpp
+index 1f9694cf9..5456fa29a 100644
+--- a/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64AsmBackend.cpp
++++ b/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64AsmBackend.cpp
+@@ -795,7 +795,7 @@ MCAsmBackend *llvm::createAArch64leAsmBackend(const Target &T,
+   assert(TheTriple.isOSBinFormatELF() && "Invalid target");
+ 
+   uint8_t OSABI = MCELFObjectTargetWriter::getOSABI(TheTriple.getOS());
+-  bool IsILP32 = STI.getTargetTriple().getEnvironment() == Triple::GNUILP32;
++  bool IsILP32 = STI.getTargetTriple().isILP32Environment();
+   return new ELFAArch64AsmBackend(T, TheTriple, OSABI, /*IsLittleEndian=*/true,
+                                   IsILP32);
+ }
+@@ -808,7 +808,7 @@ MCAsmBackend *llvm::createAArch64beAsmBackend(const Target &T,
+   assert(TheTriple.isOSBinFormatELF() &&
+          "Big endian is only supported for ELF targets!");
+   uint8_t OSABI = MCELFObjectTargetWriter::getOSABI(TheTriple.getOS());
+-  bool IsILP32 = STI.getTargetTriple().getEnvironment() == Triple::GNUILP32;
++  bool IsILP32 = STI.getTargetTriple().isILP32Environment();
+   return new ELFAArch64AsmBackend(T, TheTriple, OSABI, /*IsLittleEndian=*/false,
+                                   IsILP32);
+ }
+diff --git a/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64MCAsmInfo.cpp b/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64MCAsmInfo.cpp
+index bc090c615..3592dd62a 100644
+--- a/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64MCAsmInfo.cpp
++++ b/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64MCAsmInfo.cpp
+@@ -201,7 +201,7 @@ AArch64MCAsmInfoELF::AArch64MCAsmInfoELF(const Triple &T) {
+   // targeting ELF.
+   AssemblerDialect = AsmWriterVariant == Default ? Generic : AsmWriterVariant;
+ 
+-  CodePointerSize = T.getEnvironment() == Triple::GNUILP32 ? 4 : 8;
++  CodePointerSize = T.isILP32Environment() ? 4 : 8;
+ 
+   // ".comm align is in bytes but .align is pow-2."
+   AlignmentIsInBytes = false;
+diff --git a/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64MCCodeEmitter.cpp b/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64MCCodeEmitter.cpp
+index 21ff55e9d..7149fee63 100644
+--- a/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64MCCodeEmitter.cpp
++++ b/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64MCCodeEmitter.cpp
+@@ -731,7 +731,7 @@ void AArch64MCCodeEmitter::encodeInstruction(const MCInst &MI,
+     // This is a directive which applies an R_AARCH64_TLSDESC_CALL to the
+     // following (BLR) instruction. It doesn't emit any code itself so it
+     // doesn't go through the normal TableGenerated channels.
+-    auto Reloc = STI.getTargetTriple().getEnvironment() == Triple::GNUILP32
++    auto Reloc = STI.getTargetTriple().isILP32Environment()
+                      ? ELF::R_AARCH64_P32_TLSDESC_CALL
+                      : ELF::R_AARCH64_TLSDESC_CALL;
+     addFixup(Fixups, 0, MI.getOperand(0).getExpr(), Reloc);
+diff --git a/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64TargetStreamer.cpp b/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64TargetStreamer.cpp
+index d742b282b..5b1e48ffa 100644
+--- a/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64TargetStreamer.cpp
++++ b/src/llvm-project/llvm/lib/Target/AArch64/MCTargetDesc/AArch64TargetStreamer.cpp
+@@ -74,16 +74,19 @@ void AArch64TargetStreamer::emitNoteSection(unsigned Flags,
+                                             uint64_t PAuthABIVersion) {
+   assert((PAuthABIPlatform == uint64_t(-1)) ==
+          (PAuthABIVersion == uint64_t(-1)));
++  MCStreamer &OutStreamer = getStreamer();
++  MCContext &Context = OutStreamer.getContext();
++  // ILP32 objects are ELF32, whose notes and properties are 4-byte aligned
++  // (ELF64: 8-byte aligned, so the 4-byte feature data is padded).
++  bool IsELF32 = Context.getTargetTriple().isILP32Environment();
+   uint64_t DescSz = 0;
+   if (Flags != 0)
+-    DescSz += 4 * 4;
++    DescSz += IsELF32 ? 3 * 4 : 4 * 4;
+   if (PAuthABIPlatform != uint64_t(-1))
+     DescSz += 4 + 4 + 8 * 2;
+   if (DescSz == 0)
+     return;
+ 
+-  MCStreamer &OutStreamer = getStreamer();
+-  MCContext &Context = OutStreamer.getContext();
+   // Emit a .note.gnu.property section with the flags.
+   MCSectionELF *Nt = Context.getELFSection(".note.gnu.property", ELF::SHT_NOTE,
+                                            ELF::SHF_ALLOC);
+@@ -98,7 +101,7 @@ void AArch64TargetStreamer::emitNoteSection(unsigned Flags,
+   OutStreamer.switchSection(Nt);
+ 
+   // Emit the note header.
+-  OutStreamer.emitValueToAlignment(Align(8));
++  OutStreamer.emitValueToAlignment(IsELF32 ? Align(4) : Align(8));
+   OutStreamer.emitIntValue(4, 4);     // data size for "GNU\0"
+   OutStreamer.emitIntValue(DescSz, 4); // Elf_Prop array size
+   OutStreamer.emitIntValue(ELF::NT_GNU_PROPERTY_TYPE_0, 4);
+@@ -109,7 +112,8 @@ void AArch64TargetStreamer::emitNoteSection(unsigned Flags,
+     OutStreamer.emitIntValue(ELF::GNU_PROPERTY_AARCH64_FEATURE_1_AND, 4);
+     OutStreamer.emitIntValue(4, 4);     // data size
+     OutStreamer.emitIntValue(Flags, 4); // data
+-    OutStreamer.emitIntValue(0, 4);     // pad
++    if (!IsELF32)
++      OutStreamer.emitIntValue(0, 4); // pad
+   }
+ 
+   // Emit the PAuth ABI compatibility info
+diff --git a/src/llvm-project/llvm/lib/TargetParser/TargetDataLayout.cpp b/src/llvm-project/llvm/lib/TargetParser/TargetDataLayout.cpp
+index b8c3b4325..1b08d555a 100644
+--- a/src/llvm-project/llvm/lib/TargetParser/TargetDataLayout.cpp
++++ b/src/llvm-project/llvm/lib/TargetParser/TargetDataLayout.cpp
+@@ -92,7 +92,7 @@ static std::string computeAArch64DataLayout(const Triple &TT) {
+     return "e-m:w-p270:32:32-p271:32:32-p272:64:64-p:64:64-i32:32-i64:64-i128:"
+            "128-n32:64-S128-Fn32";
+   std::string Endian = TT.isLittleEndian() ? "e" : "E";
+-  std::string Ptr32 = TT.getEnvironment() == Triple::GNUILP32 ? "-p:32:32" : "";
++  std::string Ptr32 = TT.isILP32Environment() ? "-p:32:32" : "";
+   return Endian + "-m:e" + Ptr32 +
+          "-p270:32:32-p271:32:32-p272:64:64-i8:8:32-i16:16:32-i64:64-i128:128-"
+          "n32:64-S128-Fn32";
+diff --git a/src/llvm-project/llvm/lib/TargetParser/Triple.cpp b/src/llvm-project/llvm/lib/TargetParser/Triple.cpp
+index a4f9dd42c..c8273739a 100644
+--- a/src/llvm-project/llvm/lib/TargetParser/Triple.cpp
++++ b/src/llvm-project/llvm/lib/TargetParser/Triple.cpp
+@@ -378,6 +378,8 @@ StringRef Triple::getEnvironmentTypeName(EnvironmentType Kind) {
+     return "muslabi64";
+   case MuslEABI: return "musleabi";
+   case MuslEABIHF: return "musleabihf";
++  case MuslILP32:
++    return "musl_ilp32";
+   case MuslF32:
+     return "muslf32";
+   case MuslSF:
+@@ -783,6 +785,7 @@ static Triple::EnvironmentType parseEnvironment(StringRef EnvironmentName) {
+       .StartsWith("muslf32", Triple::MuslF32)
+       .StartsWith("muslsf", Triple::MuslSF)
+       .StartsWith("muslx32", Triple::MuslX32)
++      .StartsWith("musl_ilp32", Triple::MuslILP32)
+       .StartsWith("muslwali", Triple::MuslWALI)
+       .StartsWith("musl", Triple::Musl)
+       .StartsWith("msvc", Triple::MSVC)

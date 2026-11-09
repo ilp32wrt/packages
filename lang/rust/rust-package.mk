@@ -37,9 +37,20 @@ ifeq ($(strip $(RUST_PKG_LOCKED)),1)
   CARGO_PKG_ARGS+= --locked
 endif
 
+# AArch64 ILP32: the libc crate with the ILP32 port (installed by lang/rust) replaces crates.io's,
+# and Cargo.lock is moved to it first (requirements up to ^0.2.191 are met)
+RUST_ILP32_LIBC_DIR:=$(STAGING_DIR)/host/share/rust-ilp32/libc-0.2.191
+ifeq ($(CONFIG_AARCH64_ABI_ILP32),y)
+  CARGO_ILP32_PATCH:=--config 'patch.crates-io.libc.path="$(RUST_ILP32_LIBC_DIR)"'
+  CARGO_PKG_ARGS+= $(CARGO_ILP32_PATCH)
+endif
+
 # $(1) path to the package (optional)
 # $(2) additional arguments to cargo (optional)
 define Build/Compile/Cargo
+	$(if $(CARGO_ILP32_PATCH),+$(CARGO_PKG_VARS) cargo update $(CARGO_ILP32_PATCH) \
+		--manifest-path "$(PKG_BUILD_DIR)/$(if $(strip $(1)),$(strip $(1)),$(strip $(MAKE_PATH)))/Cargo.toml" \
+		-p libc || true)
 	+$(CARGO_PKG_VARS) \
 	cargo install -v \
 		--profile $(CARGO_PKG_PROFILE) \
