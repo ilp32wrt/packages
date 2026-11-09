@@ -8,7 +8,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=nspr
 PKG_VERSION:=4.36
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_MAINTAINER:=Lucian Cristian <lucian.cristian@gmail.com>
 PKG_LICENSE:=MPL-2.0
 PKG_CPE_ID:=cpe:/a:mozilla:netscape_portable_runtime
