@@ -8,7 +8,7 @@ include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=xtables-addons
 PKG_VERSION:=3.27
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 PKG_HASH:=e47ea8febe73c12ecab09d2c93578c5dc72d76f17fdf673397758f519cce6828
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.xz
@@ -36,6 +36,13 @@ define Package/xtables-addons
 endef
 
 # uses GNU configure
+
+# AArch64 ILP32: KERNEL_MAKE_FLAGS passes the kernel's CC (with -mabi=lp64) to the whole build,
+# so the iptables extensions need -mabi=ilp32 back (the last -mabi wins)
+ifeq ($(CONFIG_AARCH64_ABI_ILP32),y)
+  TARGET_CFLAGS += -mabi=ilp32
+  TARGET_LDFLAGS += -mabi=ilp32
+endif
 
 CONFIGURE_ARGS+= \
 	--with-kbuild="$(LINUX_DIR)" \
