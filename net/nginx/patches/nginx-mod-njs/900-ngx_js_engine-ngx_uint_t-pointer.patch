@@ -1,0 +1,19 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: nginx: ngx_js_engine casts to ngx_uint_t *
+
+The engine field is ngx_uint_t, but the pointer is cast to size_t *. They
+are the same type on LP64; on AArch64 ILP32 size_t is unsigned long and
+ngx_uint_t unsigned int, and GCC 14 rejects the assignment.
+
+---
+--- a/nginx-mod-njs/nginx/ngx_js.c
++++ b/nginx-mod-njs/nginx/ngx_js.c
+@@ -3113,7 +3113,7 @@
+     ngx_uint_t          *type, m;
+     ngx_conf_bitmask_t  *mask;
+ 
+-    type = (size_t *) (p + cmd->offset);
++    type = (ngx_uint_t *) (p + cmd->offset);
+     if (*type != NGX_CONF_UNSET_UINT) {
+         return "is duplicate";
+     }
