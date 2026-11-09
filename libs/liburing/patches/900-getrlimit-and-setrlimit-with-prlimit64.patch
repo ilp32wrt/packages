@@ -1,0 +1,32 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: arch: getrlimit and setrlimit with prlimit64 where they are missing
+
+AArch64 ILP32 (like riscv32) has no getrlimit or setrlimit system call, only
+prlimit64. Use it when __NR_getrlimit or __NR_setrlimit is not defined.
+
+---
+--- a/src/arch/syscall-defs.h
++++ b/src/arch/syscall-defs.h
+@@ -48,12 +48,22 @@
+ 
+ static inline int __sys_getrlimit(int resource, struct rlimit *rlim)
+ {
++#ifdef __NR_getrlimit
+ 	return (int) __do_syscall2(__NR_getrlimit, resource, rlim);
++#else
++	/* e.g. AArch64 ILP32, riscv32: only prlimit64 (rlim_t is 64 bits there) */
++	return (int) __do_syscall4(__NR_prlimit64, 0, resource, NULL, rlim);
++#endif
+ }
+ 
+ static inline int __sys_setrlimit(int resource, const struct rlimit *rlim)
+ {
++#ifdef __NR_setrlimit
+ 	return (int) __do_syscall2(__NR_setrlimit, resource, rlim);
++#else
++	/* e.g. AArch64 ILP32, riscv32: only prlimit64 (rlim_t is 64 bits there) */
++	return (int) __do_syscall4(__NR_prlimit64, 0, resource, rlim, NULL);
++#endif
+ }
+ 
+ static inline int __sys_close(int fd)
