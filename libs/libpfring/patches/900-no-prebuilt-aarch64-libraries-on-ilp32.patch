@@ -1,0 +1,22 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: configure: no prebuilt aarch64 libraries on AArch64 ILP32
+
+configure takes MACHINE from `$CC -dumpmachine` and links
+libs/libpfring_mlx_aarch64.a when it exists. That library is LP64, so the
+ILP32 link fails. Give ILP32 its own MACHINE so no prebuilt library matches
+(the Mellanox module is then not built in, as on other architectures).
+
+---
+--- a/userland/configure
++++ b/userland/configure
+@@ -3301,6 +3301,10 @@
+ 
+ 
+ MACHINE=`$CC -dumpmachine | cut -d '-' -f 1`
++# AArch64 ILP32: the prebuilt libs/*_aarch64 libraries are LP64; match none of them
++if echo '__ILP32__' | $CC -E - 2>/dev/null | grep -qx 1; then
++  MACHINE="${MACHINE}_ilp32"
++fi
+ CFLAGS=""
+ SYS_LIBS=""
+ 
