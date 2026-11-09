@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=micropython
 PKG_VERSION:=1.23.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.xz
 PKG_SOURCE_URL:=https://github.com/micropython/micropython/releases/download/v$(PKG_VERSION)
@@ -83,7 +83,8 @@ endif
 
 # Work around "variable might be clobbered" warning leading to build error
 # https://github.com/micropython/micropython/issues/12838
-ifeq ($(ARCH),riscv64)
+# (setjmp-based NLR, e.g. riscv64 and AArch64 ILP32)
+ifneq ($(filter riscv64,$(ARCH))$(CONFIG_AARCH64_ABI_ILP32),)
   MAKE_FLAGS += CFLAGS_EXTRA=-Wno-error=clobbered
 endif
 
