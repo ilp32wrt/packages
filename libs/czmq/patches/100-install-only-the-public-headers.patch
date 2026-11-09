@@ -1,0 +1,24 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: cmake: install only the public headers
+
+czmq_headers also lists private files (src/*.inc, src/foreign/sha1/sha1.h,
+src/foreign/slre/*), and all of them were installed to include/. In a shared
+prefix (the OpenWrt staging directory) sha1.h replaced libmd's, and later
+builds (ucode) picked up the wrong header. Install include/ only.
+
+---
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -326,7 +326,11 @@
+ ENDIF (ENABLE_DRAFTS)
+ 
+ source_group ("Header Files" FILES ${czmq_headers})
+-install(FILES ${czmq_headers} DESTINATION include)
++# only the public headers: the list also has private src/ files (src/foreign/sha1/sha1.h would
++# replace other packages' sha1.h in the same prefix)
++set(czmq_public_headers ${czmq_headers})
++list(FILTER czmq_public_headers INCLUDE REGEX "^include/")
++install(FILES ${czmq_public_headers} DESTINATION include)
+ 
+ ########################################################################
+ # library
