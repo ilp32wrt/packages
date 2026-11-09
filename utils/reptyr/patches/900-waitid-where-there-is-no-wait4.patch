@@ -1,0 +1,49 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: linux: waitid where there is no wait4
+
+AArch64 ILP32 and riscv32 have no wait4 system call. Like fork/clone, fall
+back to waitid(P_PID, pid, NULL, WEXITED | WNOHANG, NULL) to reap the dummy
+child in the target.
+
+---
+--- a/ptrace.h
++++ b/ptrace.h
+@@ -97,6 +97,7 @@
+     long nr_fork;
+     long nr_clone;
+     long nr_wait4;
++    long nr_waitid;
+     long nr_signal;
+     long nr_rt_sigaction;
+     long nr_openat;
+--- a/platform/linux/arch/default-syscalls.h
++++ b/platform/linux/arch/default-syscalls.h
+@@ -19,7 +19,14 @@
+     .nr_fork = -1,
+     SC(clone),
+ #endif
++#ifdef __NR_wait4
+     SC(wait4),
++    .nr_waitid = -1,
++#else
++    /* AArch64 ILP32, riscv32: no wait4 */
++    .nr_wait4 = -1,
++    SC(waitid),
++#endif
+ #ifdef __NR_signal
+     SC(signal),
+ #else
+--- a/attach.c
++++ b/attach.c
+@@ -119,7 +119,10 @@
+     kill(dummy.pid, SIGKILL);
+     ptrace_detach_child(&dummy);
+     ptrace_wait(&dummy);
+-    do_syscall(child, wait4, dummy.pid, 0, WNOHANG, 0, 0, 0);
++    if (ptrace_syscall_numbers(child)->nr_wait4 != -1)
++        do_syscall(child, wait4, dummy.pid, 0, WNOHANG, 0, 0, 0);
++    else
++        do_syscall(child, waitid, P_PID, dummy.pid, 0, WEXITED | WNOHANG, 0, 0);
+     return err;
+ }
+ 
