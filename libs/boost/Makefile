@@ -119,7 +119,8 @@ define Package/boost/config
 	# Invisible config dependency
 	config boost-context-exclude
 		bool
-		default y if (TARGET_arc770 || TARGET_archs38)
+		# AArch64 ILP32: Boost.Context has no assembly for it (b2 picks the 32-bit Arm one)
+		default y if (TARGET_arc770 || TARGET_archs38 || AARCH64_ABI_ILP32)
 		default n
 
 	config boost-coroutine-exclude
@@ -338,7 +339,7 @@ endef
 $(eval $(call DefineBoostLibrary,atomic))
 $(eval $(call DefineBoostLibrary,charconv,,,,$(if $(filter i386 x86_64 powerpc powerpc64,$(ARCH)),libquadmath)))
 $(eval $(call DefineBoostLibrary,chrono))
-$(eval $(call DefineBoostLibrary,cobalt,container context date_time,,,libopenssl))
+$(eval $(call DefineBoostLibrary,cobalt,container context date_time,,!boost-context-exclude,libopenssl))
 $(eval $(call DefineBoostLibrary,container))
 $(eval $(call DefineBoostLibrary,context,chrono ,,!boost-context-exclude))
 $(eval $(call DefineBoostLibrary,contract,atomic chrono container date_time thread))
