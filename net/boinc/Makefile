@@ -8,7 +8,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=boinc
 PKG_VERSION:=8.0.4
 PKG_VERSION_SHORT:=$(shell echo $(PKG_VERSION)| cut -f1,2 -d.)
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/BOINC/boinc
@@ -51,6 +51,11 @@ define Package/boinc/description
   provide the graphical BOINC Manager, but you can connect to this
   machine from the BOINC Manager of your desktop computer.
 endef
+
+# configure takes elf32-littleaarch64 ("aarch64") for 64 bits and then fails the C++ check
+ifeq ($(CONFIG_AARCH64_ABI_ILP32),y)
+  CONFIGURE_VARS += COMPILER_MODEL_BITS=32
+endif
 
 CONFIGURE_ARGS += \
 	--disable-server --disable-manager --enable-client --enable-libraries \

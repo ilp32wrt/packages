@@ -7,7 +7,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=boinc-wrapper
 PKG_VERSION:=26018
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/BOINC/boinc/tar.gz/refs/tags/wrapper/$(PKG_VERSION)?
@@ -24,6 +24,11 @@ PKG_FIXUP:=autoreconf
 
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/target.mk
+
+# configure takes elf32-littleaarch64 ("aarch64") for 64 bits and then fails the C++ check
+ifeq ($(CONFIG_AARCH64_ABI_ILP32),y)
+  CONFIGURE_VARS += COMPILER_MODEL_BITS=32
+endif
 
 define Package/boinc-wrapper
   SECTION:=net
