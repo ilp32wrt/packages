@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=erlang
 PKG_VERSION:=28.0.3
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_SOURCE:=otp_src_$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://github.com/erlang/otp/releases/download/OTP-$(PKG_VERSION)
@@ -36,7 +36,8 @@ include $(INCLUDE_DIR)/package.mk
 define Package/erlang/config
 config ERLANG_JIT
     bool
-    depends on (x86_64||aarch64)
+    # BeamAsm assumes 64-bit pointers on aarch64; ILP32 uses the interpreter
+    depends on (x86_64||aarch64) && !AARCH64_ABI_ILP32
     default y
 
 config ERLANG_SCTP
