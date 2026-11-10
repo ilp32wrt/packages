@@ -46,9 +46,8 @@ endif
 # $(1) path to the package (optional)
 # $(2) additional arguments to cargo (optional)
 define Build/Compile/Cargo
-	$(if $(CARGO_ILP32_PATCH),+$(CARGO_PKG_VARS) cargo update \
-		--manifest-path "$(PKG_BUILD_DIR)/$(if $(strip $(1)),$(strip $(1)),$(strip $(MAKE_PATH)))/Cargo.toml" \
-		-p libc || true)
+	$(if $(CARGO_ILP32_PATCH),+$(CARGO_PKG_VARS) cargo update --manifest-path "$(PKG_BUILD_DIR)/$(if $(strip $(1)),$(strip $(1)),$(strip $(MAKE_PATH)))/Cargo.toml" -p libc || true)
+	$(if $(CARGO_ILP32_PATCH),+$(CARGO_PKG_VARS) cargo update --manifest-path "$(PKG_BUILD_DIR)/$(if $(strip $(1)),$(strip $(1)),$(strip $(MAKE_PATH)))/Cargo.toml" -p cpufeatures || true)
 	+$(CARGO_PKG_VARS) \
 	cargo install -v \
 		--profile $(CARGO_PKG_PROFILE) \

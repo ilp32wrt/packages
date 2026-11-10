@@ -39,6 +39,24 @@ define Download/libc-ilp32
 endef
 $(eval $(call Download,libc-ilp32))
 
+# cpufeatures assumes 64-bit c_ulong on aarch64 (getauxval); fixed copies of the 0.2 and 0.3 series
+RUST_ILP32_CPUFEATURES02:=0.2.17
+RUST_ILP32_CPUFEATURES03:=0.3.1
+
+define Download/cpufeatures02-ilp32
+  FILE:=cpufeatures-$(RUST_ILP32_CPUFEATURES02)-ilp32.crate
+  URL:=https://github.com/ilp32wrt/packages/releases/download/rust-libc-$(RUST_ILP32_LIBC_VERSION)-ilp32
+  HASH:=9767c7f60c1a5481570005c6f18a13a28832d3c705135d160a34ef0c4de58072
+endef
+$(eval $(call Download,cpufeatures02-ilp32))
+
+define Download/cpufeatures03-ilp32
+  FILE:=cpufeatures-$(RUST_ILP32_CPUFEATURES03)-ilp32.crate
+  URL:=https://github.com/ilp32wrt/packages/releases/download/rust-libc-$(RUST_ILP32_LIBC_VERSION)-ilp32
+  HASH:=f33177d415b010ce507a9aed384cc595b088711722b96d901a62b9bd5af85314
+endef
+$(eval $(call Download,cpufeatures03-ilp32))
+
 define Package/rust
   SECTION:=lang
   CATEGORY:=Languages
@@ -128,6 +146,9 @@ define Host/Install
 	$(INSTALL_DIR) $(STAGING_DIR)/host/share/rust-ilp32
 	rm -rf $(STAGING_DIR)/host/share/rust-ilp32/libc-$(RUST_ILP32_LIBC_VERSION)
 	$(CP) $(HOST_BUILD_DIR)/vendor/libc-$(RUST_ILP32_LIBC_VERSION) $(STAGING_DIR)/host/share/rust-ilp32/
+	rm -rf $(STAGING_DIR)/host/share/rust-ilp32/cpufeatures-*
+	tar -xzf $(DL_DIR)/cpufeatures-$(RUST_ILP32_CPUFEATURES02)-ilp32.crate -C $(STAGING_DIR)/host/share/rust-ilp32
+	tar -xzf $(DL_DIR)/cpufeatures-$(RUST_ILP32_CPUFEATURES03)-ilp32.crate -C $(STAGING_DIR)/host/share/rust-ilp32
 endef
 
 $(eval $(call HostBuild))
