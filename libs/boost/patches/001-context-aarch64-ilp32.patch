@@ -1,0 +1,221 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: [PATCH] context: support AArch64 ILP32 (fcontext, ELF/gas)
+
+AArch64 ILP32 (aarch64-linux-gnu_ilp32, aarch64-linux-musl_ilp32) has 64-bit registers and
+32-bit pointers. The arm64 fcontext code works with three changes:
+
+- the upper 32 bits of pointer arguments are unspecified (AAPCS64): zero-extend the target
+  context, the stack top and the function addresses before use;
+- transfer_t { fcontext_t; void *; } is 8 bytes and is returned / passed in x0 alone, packed
+  (fctx in bits 0-31, data in bits 32-63);
+- ILP32 objects are ELF32: emit .note.gnu.property 4-byte aligned with descsz 12 (the ELF64
+  layout is reported as corrupt and the BTI marking is dropped).
+
+b2 deduces <architecture>arm <address-model>32 there (sizeof (void*) == 4) and selects the
+AArch32 sources, so build the AArch64 code from them when __aarch64__ is defined.
+---
+diff --git a/libs/context/src/asm/jump_arm64_aapcs_elf_gas.S b/libs/context/src/asm/jump_arm64_aapcs_elf_gas.S
+index b8abb2e..bd19177 100644
+--- a/libs/context/src/asm/jump_arm64_aapcs_elf_gas.S
++++ b/libs/context/src/asm/jump_arm64_aapcs_elf_gas.S
+@@ -55,6 +55,18 @@
+ .text
+ #if defined(__ARM_FEATURE_BTI_DEFAULT) && (__ARM_FEATURE_BTI_DEFAULT == 1)
+ /* Mark this object as requiring BTI, enabling the linker to set BTI on the output */
++#if defined(__ILP32__)
++    .pushsection .note.gnu.property, "a", %note
++    .p2align 2
++    .long 4                      /* namesz */
++    .long 12                     /* descsz (12 bytes) */
++    .long 5                      /* type = NT_GNU_PROPERTY_TYPE_0 */
++    .asciz "GNU"
++    .long 0xc0000000             /* GNU_PROPERTY_AARCH64_FEATURE_1_AND */
++    .long 4                      /* datasz = 4 */
++    .long 1                      /* GNU_PROPERTY_AARCH64_FEATURE_1_BTI */
++    .popsection
++#else
+     .pushsection .note.gnu.property, "a", %note
+     .p2align 3
+     .long 4                      /* namesz */
+@@ -68,6 +80,7 @@
+     .long 0                      /* pad to 8-byte alignment */
+     .popsection
+ #endif
++#endif
+ .align  2
+ .global jump_fcontext
+ .hidden jump_fcontext
+@@ -75,6 +88,10 @@
+ jump_fcontext:
+ #if defined(__ARM_FEATURE_BTI_DEFAULT) && (__ARM_FEATURE_BTI_DEFAULT == 1)
+     hint    #34                    /* bti c: valid indirect-entry target */
++#endif
++#if defined(__ILP32__)
++    # zero-extend the target context
++    mov w0, w0
+ #endif
+     # prepare stack for GP + FPU
+     sub  sp, sp, #0xb0
+@@ -119,7 +136,12 @@ jump_fcontext:
+     # return transfer_t from jump
+     # pass transfer_t as first arg in context function
+     # X0 == FCTX, X1 == DATA
++#if defined(__ILP32__)
++    mov w0, w4
++    bfi x0, x1, #32, #32
++#else
+     mov x0, x4
++#endif
+ 
+     # load pc
+     ldr  x4, [sp, #0xa0]
+diff --git a/libs/context/src/asm/jump_arm_aapcs_elf_gas.S b/libs/context/src/asm/jump_arm_aapcs_elf_gas.S
+index 9934c08..3ee931f 100644
+--- a/libs/context/src/asm/jump_arm_aapcs_elf_gas.S
++++ b/libs/context/src/asm/jump_arm_aapcs_elf_gas.S
+@@ -1,3 +1,7 @@
++/* AArch64 ILP32: b2 selects this AArch32 file (32-bit address model); use the AArch64 code. */
++#if defined(__aarch64__)
++#include "jump_arm64_aapcs_elf_gas.S"
++#else
+ /*
+             Copyright Oliver Kowalke 2009.
+    Distributed under the Boost Software License, Version 1.0.
+@@ -87,3 +91,4 @@ jump_fcontext:
+ 
+ @ Mark that we don't need executable stack.
+ .section .note.GNU-stack,"",%progbits
++#endif /* __aarch64__ */
+diff --git a/libs/context/src/asm/make_arm64_aapcs_elf_gas.S b/libs/context/src/asm/make_arm64_aapcs_elf_gas.S
+index 2465254..525b87b 100644
+--- a/libs/context/src/asm/make_arm64_aapcs_elf_gas.S
++++ b/libs/context/src/asm/make_arm64_aapcs_elf_gas.S
+@@ -55,6 +55,18 @@
+ .text
+ #if defined(__ARM_FEATURE_BTI_DEFAULT) && (__ARM_FEATURE_BTI_DEFAULT == 1)
+ /* Mark this object as requiring BTI, enabling the linker to set BTI on the output */
++#if defined(__ILP32__)
++    .pushsection .note.gnu.property, "a", %note
++    .p2align 2
++    .long 4                      /* namesz */
++    .long 12                     /* descsz (12 bytes) */
++    .long 5                      /* type = NT_GNU_PROPERTY_TYPE_0 */
++    .asciz "GNU"
++    .long 0xc0000000             /* GNU_PROPERTY_AARCH64_FEATURE_1_AND */
++    .long 4                      /* datasz = 4 */
++    .long 1                      /* GNU_PROPERTY_AARCH64_FEATURE_1_BTI */
++    .popsection
++#else
+     .pushsection .note.gnu.property, "a", %note
+     .p2align 3
+     .long 4                      /* namesz */
+@@ -68,6 +80,7 @@
+     .long 0                      /* pad to 8-byte alignment */
+     .popsection
+ #endif
++#endif
+ .align  2
+ .global make_fcontext
+ .hidden make_fcontext
+@@ -75,6 +88,11 @@
+ make_fcontext:
+ #if defined(__ARM_FEATURE_BTI_DEFAULT) && (__ARM_FEATURE_BTI_DEFAULT == 1)
+     hint    #34    /* bti c */
++#endif
++#if defined(__ILP32__)
++    # zero-extend the stack top and the context-function address
++    mov w0, w0
++    mov w2, w2
+ #endif
+     # shift address in x0 (allocated stack) to lower 16 byte boundary
+     and x0, x0, ~0xF
+diff --git a/libs/context/src/asm/make_arm_aapcs_elf_gas.S b/libs/context/src/asm/make_arm_aapcs_elf_gas.S
+index 9616e56..204ed7b 100644
+--- a/libs/context/src/asm/make_arm_aapcs_elf_gas.S
++++ b/libs/context/src/asm/make_arm_aapcs_elf_gas.S
+@@ -1,3 +1,7 @@
++/* AArch64 ILP32: b2 selects this AArch32 file (32-bit address model); use the AArch64 code. */
++#if defined(__aarch64__)
++#include "make_arm64_aapcs_elf_gas.S"
++#else
+ /*
+             Copyright Oliver Kowalke 2009.
+    Distributed under the Boost Software License, Version 1.0.
+@@ -80,3 +84,4 @@ finish:
+ 
+ @ Mark that we don't need executable stack.
+ .section .note.GNU-stack,"",%progbits
++#endif /* __aarch64__ */
+diff --git a/libs/context/src/asm/ontop_arm64_aapcs_elf_gas.S b/libs/context/src/asm/ontop_arm64_aapcs_elf_gas.S
+index 1e6b466..dfb02b7 100644
+--- a/libs/context/src/asm/ontop_arm64_aapcs_elf_gas.S
++++ b/libs/context/src/asm/ontop_arm64_aapcs_elf_gas.S
+@@ -55,6 +55,18 @@
+ .text
+ #if defined(__ARM_FEATURE_BTI_DEFAULT) && (__ARM_FEATURE_BTI_DEFAULT == 1)
+ /* Mark this object as requiring BTI, enabling the linker to set BTI on the output */
++#if defined(__ILP32__)
++    .pushsection .note.gnu.property, "a", %note
++    .p2align 2
++    .long 4                      /* namesz */
++    .long 12                     /* descsz (12 bytes) */
++    .long 5                      /* type = NT_GNU_PROPERTY_TYPE_0 */
++    .asciz "GNU"
++    .long 0xc0000000             /* GNU_PROPERTY_AARCH64_FEATURE_1_AND */
++    .long 4                      /* datasz = 4 */
++    .long 1                      /* GNU_PROPERTY_AARCH64_FEATURE_1_BTI */
++    .popsection
++#else
+     .pushsection .note.gnu.property, "a", %note
+     .p2align 3
+     .long 4                      /* namesz */
+@@ -68,6 +80,7 @@
+     .long 0                      /* pad to 8-byte alignment */
+     .popsection
+ #endif
++#endif
+ .align  2
+ .global ontop_fcontext
+ .hidden ontop_fcontext
+@@ -75,6 +88,11 @@
+ ontop_fcontext:
+ #if defined(__ARM_FEATURE_BTI_DEFAULT) && (__ARM_FEATURE_BTI_DEFAULT == 1)
+     hint    #34    /* bti c */
++#endif
++#if defined(__ILP32__)
++    # zero-extend the target context and the ontop-function address
++    mov w0, w0
++    mov w2, w2
+ #endif
+     # prepare stack for GP + FPU
+     sub  sp, sp, #0xb0
+@@ -119,7 +137,12 @@ ontop_fcontext:
+     # return transfer_t from jump
+     # pass transfer_t as first arg in context function
+     # X0 == FCTX, X1 == DATA
++#if defined(__ILP32__)
++    mov w0, w4
++    bfi x0, x1, #32, #32
++#else
+     mov x0, x4
++#endif
+ 
+     # skip pc
+     # restore stack from GP + FPU
+diff --git a/libs/context/src/asm/ontop_arm_aapcs_elf_gas.S b/libs/context/src/asm/ontop_arm_aapcs_elf_gas.S
+index 8c6c902..e0e4c7c 100644
+--- a/libs/context/src/asm/ontop_arm_aapcs_elf_gas.S
++++ b/libs/context/src/asm/ontop_arm_aapcs_elf_gas.S
+@@ -1,3 +1,7 @@
++/* AArch64 ILP32: b2 selects this AArch32 file (32-bit address model); use the AArch64 code. */
++#if defined(__aarch64__)
++#include "ontop_arm64_aapcs_elf_gas.S"
++#else
+ /*
+             Copyright Oliver Kowalke 2009.
+    Distributed under the Boost Software License, Version 1.0.
+@@ -92,3 +96,4 @@ ontop_fcontext:
+ 
+ @ Mark that we don't need executable stack.
+ .section .note.GNU-stack,"",%progbits
++#endif /* __aarch64__ */

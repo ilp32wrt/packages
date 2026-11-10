@@ -13,7 +13,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=boost
 PKG_VERSION:=1.90.0
 PKG_SOURCE_VERSION:=1_90_0
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 
 PKG_SOURCE:=$(PKG_NAME)_$(PKG_SOURCE_VERSION).tar.bz2
 PKG_SOURCE_URL:=https://archives.boost.io/release/$(PKG_VERSION)/source @SF/$(PKG_NAME)/$(PKG_NAME)/$(PKG_VERSION)
@@ -119,8 +119,7 @@ define Package/boost/config
 	# Invisible config dependency
 	config boost-context-exclude
 		bool
-		# AArch64 ILP32: Boost.Context has no assembly for it (b2 picks the 32-bit Arm one)
-		default y if (TARGET_arc770 || TARGET_archs38 || AARCH64_ABI_ILP32)
+		default y if (TARGET_arc770 || TARGET_archs38)
 		default n
 
 	config boost-coroutine-exclude
