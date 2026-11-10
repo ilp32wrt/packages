@@ -1,0 +1,49 @@
+diff -ruN a/src/targets.rs b/src/targets.rs
+--- a/src/targets.rs
++++ b/src/targets.rs
+@@ -856,6 +856,7 @@
+     LinuxKernel,
+     Macabi,
+     Musl,
++    MuslIlp32,
+     Musleabi,
+     Musleabihf,
+     Muslabi64,
+@@ -899,6 +900,7 @@
+             LinuxKernel => Cow::Borrowed("linuxkernel"),
+             Macabi => Cow::Borrowed("macabi"),
+             Musl => Cow::Borrowed("musl"),
++            MuslIlp32 => Cow::Borrowed("musl_ilp32"),
+             Musleabi => Cow::Borrowed("musleabi"),
+             Musleabihf => Cow::Borrowed("musleabihf"),
+             Muslabi64 => Cow::Borrowed("muslabi64"),
+@@ -1692,6 +1694,7 @@
+             "linuxkernel" => LinuxKernel,
+             "macabi" => Macabi,
+             "musl" => Musl,
++            "musl_ilp32" => MuslIlp32,
+             "musleabi" => Musleabi,
+             "musleabihf" => Musleabihf,
+             "muslabi64" => Muslabi64,
+@@ -1774,6 +1777,7 @@
+             "aarch64-unknown-illumos",
+             "aarch64-unknown-linux-gnu",
+             "aarch64-unknown-linux-gnu_ilp32",
++            "aarch64-unknown-linux-musl_ilp32",
+             "aarch64-unknown-linux-musl",
+             "aarch64-unknown-linux-ohos",
+             "aarch64-unknown-netbsd",
+diff -ruN a/src/triple.rs b/src/triple.rs
+--- a/src/triple.rs
++++ b/src/triple.rs
+@@ -111,7 +111,9 @@
+     pub fn pointer_width(&self) -> Result<PointerWidth, ()> {
+         // Some ABIs have a different pointer width than the CPU architecture.
+         match self.environment {
+-            Environment::Gnux32 | Environment::GnuIlp32 => return Ok(PointerWidth::U32),
++            Environment::Gnux32 | Environment::GnuIlp32 | Environment::MuslIlp32 => {
++                return Ok(PointerWidth::U32)
++            }
+             _ => {}
+         }
+ 

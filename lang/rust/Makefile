@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=rust
 PKG_VERSION:=1.96.0
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 
 PKG_SOURCE:=rustc-$(PKG_VERSION)-src.tar.xz
 PKG_SOURCE_URL:=https://static.rust-lang.org/dist/
@@ -25,55 +25,55 @@ include $(INCLUDE_DIR)/host-build.mk
 include $(INCLUDE_DIR)/package.mk
 include ./rust-values.mk
 
-# std uses libc 0.2.191 with the AArch64 ILP32 glibc/musl port (patches/0103 locks it); the same
-# crate is installed for cargo packages ([patch.crates-io] in rust-package.mk)
+# Crates with the AArch64 ILP32 port: the crates.io release plus crate-patches/<crate>-<version>/,
+# applied in Host/Prepare and installed to $(STAGING_DIR)/host/share/rust-ilp32 for cargo packages
+# ([patch.crates-io], lang/rust-ilp32/rust-ilp32.mk). std uses libc (patches/0103 locks it).
+#   libc: AArch64 ILP32 glibc/musl port
+#   cpufeatures: assumes a 64-bit c_ulong on aarch64 (getauxval)
+#   target-lexicon (pyo3-build-config etc.): does not know the musl_ilp32 environment
 RUST_ILP32_LIBC_VERSION:=0.2.191
-RUST_ILP32_LIBC_CRATE:=libc-$(RUST_ILP32_LIBC_VERSION)-ilp32.crate
-RUST_ILP32_LIBC_HASH:=df0684e089db1c9c721fe133d8c5ce4e14b26c2c6d28d81a09c10c4554266566
+RUST_ILP32_LIBC_HASH:=65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a
+RUST_ILP32_CRATE_LIST:=
 
-define Download/libc-ilp32
-  FILE:=$(RUST_ILP32_LIBC_CRATE)
-  # not published yet: put the file into dl/ for now
-  URL:=https://github.com/ilp32wrt/packages/releases/download/rust-libc-$(RUST_ILP32_LIBC_VERSION)-ilp32
-  HASH:=$(RUST_ILP32_LIBC_HASH)
+define Download/libc-0.2.191
+  FILE:=libc-0.2.191.crate
+  URL:=https://static.crates.io/crates/libc
+  HASH:=65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a
 endef
-$(eval $(call Download,libc-ilp32))
+$(eval $(call Download,libc-0.2.191))
+RUST_ILP32_CRATE_LIST+=libc-0.2.191
 
-# cpufeatures assumes 64-bit c_ulong on aarch64 (getauxval); fixed copies of the 0.2 and 0.3 series
-RUST_ILP32_CPUFEATURES02:=0.2.17
-RUST_ILP32_CPUFEATURES03:=0.3.1
-
-define Download/cpufeatures02-ilp32
-  FILE:=cpufeatures-$(RUST_ILP32_CPUFEATURES02)-ilp32.crate
-  URL:=https://github.com/ilp32wrt/packages/releases/download/rust-libc-$(RUST_ILP32_LIBC_VERSION)-ilp32
-  HASH:=9767c7f60c1a5481570005c6f18a13a28832d3c705135d160a34ef0c4de58072
+define Download/cpufeatures-0.2.17
+  FILE:=cpufeatures-0.2.17.crate
+  URL:=https://static.crates.io/crates/cpufeatures
+  HASH:=59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280
 endef
-$(eval $(call Download,cpufeatures02-ilp32))
+$(eval $(call Download,cpufeatures-0.2.17))
+RUST_ILP32_CRATE_LIST+=cpufeatures-0.2.17
 
-define Download/cpufeatures03-ilp32
-  FILE:=cpufeatures-$(RUST_ILP32_CPUFEATURES03)-ilp32.crate
-  URL:=https://github.com/ilp32wrt/packages/releases/download/rust-libc-$(RUST_ILP32_LIBC_VERSION)-ilp32
-  HASH:=f33177d415b010ce507a9aed384cc595b088711722b96d901a62b9bd5af85314
+define Download/cpufeatures-0.3.1
+  FILE:=cpufeatures-0.3.1.crate
+  URL:=https://static.crates.io/crates/cpufeatures
+  HASH:=5ca28b0ae3115b884660db4118d803791fd6756b6e88f39c0f3f7859060d7566
 endef
-$(eval $(call Download,cpufeatures03-ilp32))
+$(eval $(call Download,cpufeatures-0.3.1))
+RUST_ILP32_CRATE_LIST+=cpufeatures-0.3.1
 
-# target-lexicon (pyo3-build-config etc.) does not know the musl_ilp32 environment
-RUST_ILP32_TARGET_LEXICON013:=0.13.5
-RUST_ILP32_TARGET_LEXICON012:=0.12.16
-
-define Download/target-lexicon013-ilp32
-  FILE:=target-lexicon-$(RUST_ILP32_TARGET_LEXICON013)-ilp32.crate
-  URL:=https://github.com/ilp32wrt/packages/releases/download/rust-libc-$(RUST_ILP32_LIBC_VERSION)-ilp32
-  HASH:=fb6f5f991ed9671be9cfb520873f6742f38f62773f1dea10d03109baace7eb56
+define Download/target-lexicon-0.13.5
+  FILE:=target-lexicon-0.13.5.crate
+  URL:=https://static.crates.io/crates/target-lexicon
+  HASH:=adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca
 endef
-$(eval $(call Download,target-lexicon013-ilp32))
+$(eval $(call Download,target-lexicon-0.13.5))
+RUST_ILP32_CRATE_LIST+=target-lexicon-0.13.5
 
-define Download/target-lexicon012-ilp32
-  FILE:=target-lexicon-$(RUST_ILP32_TARGET_LEXICON012)-ilp32.crate
-  URL:=https://github.com/ilp32wrt/packages/releases/download/rust-libc-$(RUST_ILP32_LIBC_VERSION)-ilp32
-  HASH:=b7abe3471d6cba0e2a4bb18e0b0657a27a64058063cb3c6f60e426f60e3371fe
+define Download/target-lexicon-0.12.16
+  FILE:=target-lexicon-0.12.16.crate
+  URL:=https://static.crates.io/crates/target-lexicon
+  HASH:=61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1
 endef
-$(eval $(call Download,target-lexicon012-ilp32))
+$(eval $(call Download,target-lexicon-0.12.16))
+RUST_ILP32_CRATE_LIST+=target-lexicon-0.12.16
 
 define Package/rust
   SECTION:=lang
@@ -131,7 +131,19 @@ HOST_CONFIGURE_ARGS = \
 
 define Host/Prepare
 	$(call Host/Prepare/Default)
-	tar -xzf $(DL_DIR)/$(RUST_ILP32_LIBC_CRATE) -C $(HOST_BUILD_DIR)/vendor
+	rm -rf $(HOST_BUILD_DIR)/ilp32-crates
+	mkdir -p $(HOST_BUILD_DIR)/ilp32-crates
+	for c in $(RUST_ILP32_CRATE_LIST); do \
+		tar -xzf $(DL_DIR)/$$$$c.crate -C $(HOST_BUILD_DIR)/ilp32-crates || exit 1; \
+		rm -f $(HOST_BUILD_DIR)/ilp32-crates/$$$$c/.cargo_vcs_info.json; \
+		for p in $(CURDIR)/crate-patches/$$$$c/*.patch; do \
+			$(PATCH) -d $(HOST_BUILD_DIR)/ilp32-crates/$$$$c -p1 -E --forward --no-backup-if-mismatch \
+				-i $$$$p || exit 1; \
+		done; \
+	done
+	# vendored for std; "files":{} skips the per-file checksums of the patched sources
+	rm -rf $(HOST_BUILD_DIR)/vendor/libc-$(RUST_ILP32_LIBC_VERSION)
+	$(CP) $(HOST_BUILD_DIR)/ilp32-crates/libc-$(RUST_ILP32_LIBC_VERSION) $(HOST_BUILD_DIR)/vendor/
 	printf '{"files":{},"package":"%s"}' $(RUST_ILP32_LIBC_HASH) \
 		> $(HOST_BUILD_DIR)/vendor/libc-$(RUST_ILP32_LIBC_VERSION)/.cargo-checksum.json
 endef
@@ -161,15 +173,9 @@ define Host/Install
 		find . -mindepth 2 -maxdepth 2 -type f -name install.sh \
 			-execdir bash '{}' --prefix=$(STAGING_DIR)/host --disable-ldconfig \; ; \
 	)
+	rm -rf $(STAGING_DIR)/host/share/rust-ilp32
 	$(INSTALL_DIR) $(STAGING_DIR)/host/share/rust-ilp32
-	rm -rf $(STAGING_DIR)/host/share/rust-ilp32/libc-$(RUST_ILP32_LIBC_VERSION)
-	$(CP) $(HOST_BUILD_DIR)/vendor/libc-$(RUST_ILP32_LIBC_VERSION) $(STAGING_DIR)/host/share/rust-ilp32/
-	rm -rf $(STAGING_DIR)/host/share/rust-ilp32/cpufeatures-*
-	tar -xzf $(DL_DIR)/cpufeatures-$(RUST_ILP32_CPUFEATURES02)-ilp32.crate -C $(STAGING_DIR)/host/share/rust-ilp32
-	tar -xzf $(DL_DIR)/cpufeatures-$(RUST_ILP32_CPUFEATURES03)-ilp32.crate -C $(STAGING_DIR)/host/share/rust-ilp32
-	rm -rf $(STAGING_DIR)/host/share/rust-ilp32/target-lexicon-*
-	tar -xzf $(DL_DIR)/target-lexicon-$(RUST_ILP32_TARGET_LEXICON013)-ilp32.crate -C $(STAGING_DIR)/host/share/rust-ilp32
-	tar -xzf $(DL_DIR)/target-lexicon-$(RUST_ILP32_TARGET_LEXICON012)-ilp32.crate -C $(STAGING_DIR)/host/share/rust-ilp32
+	$(CP) $(HOST_BUILD_DIR)/ilp32-crates/* $(STAGING_DIR)/host/share/rust-ilp32/
 endef
 
 $(eval $(call HostBuild))

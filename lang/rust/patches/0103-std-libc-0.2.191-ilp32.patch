@@ -16,7 +16,7 @@ index ffa9a6302..942c07934 100644
 +version = "0.2.191"
  source = "registry+https://github.com/rust-lang/crates.io-index"
 -checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
-+checksum = "df0684e089db1c9c721fe133d8c5ce4e14b26c2c6d28d81a09c10c4554266566"
++checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
  dependencies = [
   "rustc-std-workspace-core",
  ]
