@@ -1,0 +1,88 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: [PATCH] py/nlraarch64: support AArch64 ILP32
+
+On AArch64 ILP32 (aarch64-linux-gnu_ilp32, aarch64-linux-musl_ilp32) pointers are 4 bytes but
+the saved registers x19-x30 and sp are 8 bytes. Keep 64-bit slots for them in nlr_buf_t (regs
+then starts at offset 8, after the 4-byte prev and ret_val), use the matching offsets in
+nlr_push / nlr_jump, and zero-extend the nlr_buf_t pointer (its upper 32 bits are unspecified
+under AAPCS64).
+---
+diff --git a/py/nlr.h b/py/nlr.h
+index 62972dba..ab48c7ff 100644
+--- a/py/nlr.h
++++ b/py/nlr.h
+@@ -115,6 +115,9 @@ struct _nlr_buf_t {
+ 
+     #if MICROPY_NLR_SETJMP
+     jmp_buf jmpbuf;
++    #elif MICROPY_NLR_AARCH64 && defined(__ILP32__)
++    // AArch64 ILP32: 64-bit registers, 32-bit pointers
++    unsigned long long regs[MICROPY_NLR_NUM_REGS];
+     #else
+     void *regs[MICROPY_NLR_NUM_REGS];
+     #endif
+diff --git a/py/nlraarch64.c b/py/nlraarch64.c
+index d6d87ebc..7cfbcd49 100644
+--- a/py/nlraarch64.c
++++ b/py/nlraarch64.c
+@@ -42,6 +42,16 @@ __asm(
+     ".global nlr_push        \n"
+     #endif
+     "mov x9, sp              \n"
++    #if defined(__ILP32__)
++    "mov w0, w0              \n"
++    "stp lr,  x9,  [x0,   #8]\n" // 8 == offsetof(nlr_buf_t, regs)
++    "stp x19, x20, [x0,  #24]\n"
++    "stp x21, x22, [x0,  #40]\n"
++    "stp x23, x24, [x0,  #56]\n"
++    "stp x25, x26, [x0,  #72]\n"
++    "stp x27, x28, [x0,  #88]\n"
++    "str x29,      [x0, #104]\n"
++    #else
+     "stp lr,  x9,  [x0,  #16]\n" // 16 == offsetof(nlr_buf_t, regs)
+     "stp x19, x20, [x0,  #32]\n"
+     "stp x21, x22, [x0,  #48]\n"
+@@ -49,6 +59,7 @@ __asm(
+     "stp x25, x26, [x0,  #80]\n"
+     "stp x27, x28, [x0,  #96]\n"
+     "str x29,      [x0, #112]\n"
++    #endif
+     #if defined(__APPLE__) && defined(__MACH__)
+     "b _nlr_push_tail        \n" // do the rest in C
+     #else
+@@ -59,6 +70,27 @@ __asm(
+ NORETURN void nlr_jump(void *val) {
+     MP_NLR_JUMP_HEAD(val, top)
+ 
++    #if defined(__ILP32__)
++    MP_STATIC_ASSERT(offsetof(nlr_buf_t, regs) == 8); // asm assumes it
++    MP_STATIC_ASSERT(sizeof(((nlr_buf_t *)0)->regs[0]) == 8);
++
++    __asm volatile (
++        "mov w0, %w0             \n" // zero-extends the 32-bit pointer
++        "ldr x29,      [x0, #104]\n"
++        "ldp x27, x28, [x0,  #88]\n"
++        "ldp x25, x26, [x0,  #72]\n"
++        "ldp x23, x24, [x0,  #56]\n"
++        "ldp x21, x22, [x0,  #40]\n"
++        "ldp x19, x20, [x0,  #24]\n"
++        "ldp lr,  x9,  [x0,   #8]\n" // 8 == offsetof(nlr_buf_t, regs)
++        "mov sp, x9              \n"
++        "mov x0, #1              \n"  // non-local return
++        "ret                     \n"
++        :
++        : "r" (top)
++        : "memory"
++        );
++    #else
+     MP_STATIC_ASSERT(offsetof(nlr_buf_t, regs) == 16); // asm assumes it
+ 
+     __asm volatile (
+@@ -77,6 +109,7 @@ NORETURN void nlr_jump(void *val) {
+         : "r" (top)
+         : "memory"
+         );
++    #endif
+ 
+     MP_UNREACHABLE
+ }
