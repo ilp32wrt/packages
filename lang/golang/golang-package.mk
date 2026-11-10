@@ -242,9 +242,11 @@ GO_PKG_DEFAULT_GCFLAGS= \
 GO_PKG_DEFAULT_ASMFLAGS= \
 	$(if $(GO_PKG_ENABLE_SPECTRE),-spectre all)
 
+# external linking needs cgo; without cgo (AArch64 ILP32) Go links internally, also for PIE
 GO_PKG_DEFAULT_LDFLAGS= \
-	-linkmode external \
-	-extldflags '$(patsubst -z%,-Wl$(comma)-z$(comma)%,$(TARGET_LDFLAGS))'
+	$(if $(filter 1,$(GO_PKG_CGO_ENABLED)), \
+		-linkmode external \
+		-extldflags '$(patsubst -z%,-Wl$(comma)-z$(comma)%,$(TARGET_LDFLAGS))')
 
 GO_PKG_CUSTOM_LDFLAGS= \
 	$(GO_PKG_LDFLAGS) \
