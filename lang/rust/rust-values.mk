@@ -136,3 +136,17 @@ CARGO_PKG_CONFIG_VARS= \
 CARGO_PKG_PROFILE:=$(if $(CONFIG_DEBUG),dev,release)
 
 CARGO_RUSTFLAGS+=-Clink-arg=-fuse-ld=$(TARGET_LINKER)
+
+# AArch64 ILP32: crates.io's libc has no AArch64 ILP32 port. lang/rust installs the ported libc
+# crate; this cargo config in the target build directory makes every cargo run below it use it
+# (rust-package.mk, but also CMake (fish) and maturin/setuptools-rust (Python) builds).
+ifeq ($(CONFIG_AARCH64_ABI_ILP32),y)
+  RUST_ILP32_LIBC_DIR:=$(STAGING_DIR)/host/share/rust-ilp32/libc-0.2.191
+  ifneq ($(BUILD_DIR),)
+    $(shell mkdir -p '$(BUILD_DIR)/.cargo' && \
+      printf '[patch.crates-io]\nlibc = { path = "%s" }\n' '$(RUST_ILP32_LIBC_DIR)' > '$(BUILD_DIR)/.cargo/config.toml.new' && \
+      { cmp -s '$(BUILD_DIR)/.cargo/config.toml.new' '$(BUILD_DIR)/.cargo/config.toml' && \
+        rm -f '$(BUILD_DIR)/.cargo/config.toml.new' || \
+        mv '$(BUILD_DIR)/.cargo/config.toml.new' '$(BUILD_DIR)/.cargo/config.toml'; })
+  endif
+endif
