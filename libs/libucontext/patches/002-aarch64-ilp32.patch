@@ -1,0 +1,161 @@
+From: liviyifan <344781483+liviyifan@users.noreply.github.com>
+Subject: [PATCH] aarch64: support the ILP32 ABI
+
+On AArch64 ILP32 (aarch64-linux-gnu_ilp32, aarch64-linux-musl_ilp32) the registers are 64-bit but
+pointers and long are 32-bit:
+
+- uc_mcontext starts at 160 instead of 176 (uc_flags, uc_link and uc_stack are 20 bytes); derive
+  all offsets from that base (LP64 values unchanged) and check __reserved and the register size.
+- makecontext: registers and stack argument slots are 8 bytes (unsigned long is 4).
+- the upper halves of incoming pointer arguments are unspecified: zero-extend x0 (and x1) on entry
+  of getcontext, setcontext and swapcontext.
+- trampoline: fetch uc_link from w19.
+- freestanding bits.h: 64-bit register types.
+---
+diff --git a/arch/aarch64/defs.h b/arch/aarch64/defs.h
+index 5398adc..316362f 100644
+--- a/arch/aarch64/defs.h
++++ b/arch/aarch64/defs.h
+@@ -2,14 +2,23 @@
+ #define __ARCH_AARCH64_DEFS_H
+ 
+ #define REG_SZ		(8)
+-#define MCONTEXT_GREGS	(184)
++
++/* Offset of uc_mcontext in ucontext_t: uc_flags, uc_link and uc_stack take 40 bytes on LP64 and
++ * 20 bytes on ILP32, then the 128-byte signal mask area, then the 16-byte aligned mcontext. The
++ * mcontext (struct sigcontext) itself is the same on both: 64-bit registers. */
++#ifdef __ILP32__
++# define MCONTEXT_BASE	(160)
++#else
++# define MCONTEXT_BASE	(176)
++#endif
++#define MCONTEXT_GREGS	(MCONTEXT_BASE + 8)
+ 
+ #define R0_OFFSET	REG_OFFSET(0)
+ 
+-#define SP_OFFSET	432
+-#define PC_OFFSET	440
+-#define PSTATE_OFFSET	448
+-#define FPSIMD_CONTEXT_OFFSET 464
++#define SP_OFFSET	(MCONTEXT_BASE + 256)
++#define PC_OFFSET	(MCONTEXT_BASE + 264)
++#define PSTATE_OFFSET	(MCONTEXT_BASE + 272)
++#define FPSIMD_CONTEXT_OFFSET (MCONTEXT_BASE + 288)
+ 
+ #ifndef FPSIMD_MAGIC
+ # define FPSIMD_MAGIC	0x46508001
+@@ -19,8 +28,13 @@
+ # define ESR_MAGIC	0x45535201
+ #endif
+ 
++#ifdef __ILP32__
++#define FETCH_LINKPTR(dest) \
++	asm("mov	%w0, w19" : "=r" ((dest)))
++#else
+ #define FETCH_LINKPTR(dest) \
+ 	asm("mov	%0, x19" : "=r" ((dest)))
++#endif
+ 
+ #include "common-defs.h"
+ 
+diff --git a/arch/aarch64/getcontext.S b/arch/aarch64/getcontext.S
+index 5240728..be3905d 100644
+--- a/arch/aarch64/getcontext.S
++++ b/arch/aarch64/getcontext.S
+@@ -20,6 +20,9 @@ ALIAS(__getcontext, libucontext_getcontext)
+ 	TYPE(libucontext_getcontext)
+ 	ENT(libucontext_getcontext)
+ PROC_NAME(libucontext_getcontext):
++#ifdef __ILP32__
++	mov	w0, w0
++#endif
+ 	str	xzr, [x0, #REG_OFFSET(0)]
+ 
+ 	/* save x2 and x3 for reuse */
+diff --git a/arch/aarch64/include/libucontext/bits.h b/arch/aarch64/include/libucontext/bits.h
+index e249448..7cf818f 100644
+--- a/arch/aarch64/include/libucontext/bits.h
++++ b/arch/aarch64/include/libucontext/bits.h
+@@ -1,8 +1,8 @@
+ #ifndef LIBUCONTEXT_BITS_H
+ #define LIBUCONTEXT_BITS_H
+ 
+-typedef unsigned long libucontext_greg_t;
+-typedef unsigned long libucontext_gregset_t[34];
++typedef unsigned long long libucontext_greg_t;
++typedef unsigned long long libucontext_gregset_t[34];
+ 
+ typedef struct {
+ 	__uint128_t vregs[32];
+@@ -11,9 +11,9 @@ typedef struct {
+ } libucontext_fpregset_t;
+ 
+ typedef struct sigcontext {
+-	unsigned long fault_address;
+-	unsigned long regs[31];
+-	unsigned long sp, pc, pstate;
++	unsigned long long fault_address;
++	unsigned long long regs[31];
++	unsigned long long sp, pc, pstate;
+ 	long double __reserved[256];
+ } libucontext_mcontext_t;
+ 
+diff --git a/arch/aarch64/makecontext.c b/arch/aarch64/makecontext.c
+index 081ee72..0ccefc5 100644
+--- a/arch/aarch64/makecontext.c
++++ b/arch/aarch64/makecontext.c
+@@ -25,18 +25,20 @@ _Static_assert(offsetof(libucontext_ucontext_t, uc_mcontext.regs[0]) == R0_OFFSE
+ _Static_assert(offsetof(libucontext_ucontext_t, uc_mcontext.sp) == SP_OFFSET, "SP_OFFSET is invalid");
+ _Static_assert(offsetof(libucontext_ucontext_t, uc_mcontext.pc) == PC_OFFSET, "PC_OFFSET is invalid");
+ _Static_assert(offsetof(libucontext_ucontext_t, uc_mcontext.pstate) == PSTATE_OFFSET, "PSTATE_OFFSET is invalid");
++_Static_assert(offsetof(libucontext_ucontext_t, uc_mcontext.__reserved) == FPSIMD_CONTEXT_OFFSET, "FPSIMD_CONTEXT_OFFSET is invalid");
++_Static_assert(sizeof(((libucontext_ucontext_t *) 0)->uc_mcontext.regs[0]) == REG_SZ, "REG_SZ is invalid");
+ 
+ void
+ libucontext_makecontext(libucontext_ucontext_t *ucp, void (*func)(void), int argc, ...)
+ {
+-	unsigned long *sp;
+-	unsigned long *regp;
++	uint64_t *sp;
++	uint64_t *regp;
+ 	va_list va;
+ 	int i;
+ 
+-	sp = (unsigned long *) ((uintptr_t) ucp->uc_stack.ss_sp + ucp->uc_stack.ss_size);
++	sp = (uint64_t *) ((uintptr_t) ucp->uc_stack.ss_sp + ucp->uc_stack.ss_size);
+ 	sp -= argc < 8 ? 0 : argc - 8;
+-	sp = (unsigned long *) (((uintptr_t) sp & -16L));
++	sp = (uint64_t *) (((uintptr_t) sp & -16L));
+ 
+ 	ucp->uc_mcontext.sp = (uintptr_t) sp;
+ 	ucp->uc_mcontext.pc = (uintptr_t) func;
+diff --git a/arch/aarch64/setcontext.S b/arch/aarch64/setcontext.S
+index f348360..75e6e17 100644
+--- a/arch/aarch64/setcontext.S
++++ b/arch/aarch64/setcontext.S
+@@ -20,6 +20,9 @@ ALIAS(__setcontext, libucontext_setcontext)
+ 	TYPE(libucontext_setcontext)
+ 	ENT(libucontext_setcontext)
+ PROC_NAME(libucontext_setcontext):
++#ifdef __ILP32__
++	mov	w0, w0
++#endif
+ 	/* restore GPRs */
+ 	ldp	x18, x19, [x0, #REG_OFFSET(18)]
+ 	ldp	x20, x21, [x0, #REG_OFFSET(20)]
+diff --git a/arch/aarch64/swapcontext.S b/arch/aarch64/swapcontext.S
+index fc587e3..da8fc09 100644
+--- a/arch/aarch64/swapcontext.S
++++ b/arch/aarch64/swapcontext.S
+@@ -20,6 +20,10 @@ ALIAS(__swapcontext, libucontext_swapcontext)
+ 	TYPE(libucontext_swapcontext)
+ 	ENT(libucontext_swapcontext)
+ PROC_NAME(libucontext_swapcontext):
++#ifdef __ILP32__
++	mov	w0, w0
++	mov	w1, w1
++#endif
+ 	str	xzr, [x0, #REG_OFFSET(0)]
+ 
+ 	/* save GPRs */
