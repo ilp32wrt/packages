@@ -137,7 +137,8 @@ CARGO_PKG_PROFILE:=$(if $(CONFIG_DEBUG),dev,release)
 
 CARGO_RUSTFLAGS+=-Clink-arg=-fuse-ld=$(TARGET_LINKER)
 
-# AArch64 ILP32: crates.io's libc has no AArch64 ILP32 port and cpufeatures assumes a 64-bit c_ulong.
+# AArch64 ILP32: crates.io's libc has no AArch64 ILP32 port, cpufeatures assumes a 64-bit c_ulong,
+# and target-lexicon does not know the musl_ilp32 environment (pyo3-build-config).
 # lang/rust installs fixed crates; cargo packages use them through [patch.crates-io]:
 # - rust-package.mk passes RUST_ILP32_CARGO_ARGS (cargo install --path does not read the package's
 #   .cargo/config.toml);
@@ -150,14 +151,17 @@ ifeq ($(CONFIG_AARCH64_ABI_ILP32),y)
 	--config 'patch.crates-io.libc.path="$(RUST_ILP32_CRATES)/libc-0.2.191"' \
 	--config 'patch.crates-io.cpufeatures.path="$(RUST_ILP32_CRATES)/cpufeatures-0.2.17"' \
 	--config 'patch.crates-io.cpufeatures03.path="$(RUST_ILP32_CRATES)/cpufeatures-0.3.1"' \
-	--config 'patch.crates-io.cpufeatures03.package="cpufeatures"'
+	--config 'patch.crates-io.cpufeatures03.package="cpufeatures"' \
+	--config 'patch.crates-io.target-lexicon.path="$(RUST_ILP32_CRATES)/target-lexicon-0.13.5"' \
+	--config 'patch.crates-io.target-lexicon012.path="$(RUST_ILP32_CRATES)/target-lexicon-0.12.16"' \
+	--config 'patch.crates-io.target-lexicon012.package="target-lexicon"'
 
   define RustIlp32/CargoPatch
 	mkdir -p $(PKG_BUILD_DIR)/.cargo
-	printf '[patch.crates-io]\nlibc = { path = "%s/libc-0.2.191" }\ncpufeatures = { path = "%s/cpufeatures-0.2.17" }\ncpufeatures03 = { path = "%s/cpufeatures-0.3.1", package = "cpufeatures" }\n' \
-		'$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' > $(PKG_BUILD_DIR)/.cargo/config.toml
+	printf '[patch.crates-io]\nlibc = { path = "%s/libc-0.2.191" }\ncpufeatures = { path = "%s/cpufeatures-0.2.17" }\ncpufeatures03 = { path = "%s/cpufeatures-0.3.1", package = "cpufeatures" }\ntarget-lexicon = { path = "%s/target-lexicon-0.13.5" }\ntarget-lexicon012 = { path = "%s/target-lexicon-0.12.16", package = "target-lexicon" }\n' \
+		'$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' > $(PKG_BUILD_DIR)/.cargo/config.toml
 	for lock in $$$$(find $(PKG_BUILD_DIR) -name Cargo.lock -not -path '*/vendor/*' -not -path '*/target/*'); do \
-		for crate in libc cpufeatures; do \
+		for crate in libc cpufeatures target-lexicon; do \
 			( cd "$$$$(dirname "$$$$lock")" && CARGO_HOME=$(CARGO_HOME) $(STAGING_DIR)/host/bin/cargo update -p $$$$crate ) \
 				> /dev/null 2>&1 || true; \
 		done; \

@@ -57,6 +57,24 @@ define Download/cpufeatures03-ilp32
 endef
 $(eval $(call Download,cpufeatures03-ilp32))
 
+# target-lexicon (pyo3-build-config etc.) does not know the musl_ilp32 environment
+RUST_ILP32_TARGET_LEXICON013:=0.13.5
+RUST_ILP32_TARGET_LEXICON012:=0.12.16
+
+define Download/target-lexicon013-ilp32
+  FILE:=target-lexicon-$(RUST_ILP32_TARGET_LEXICON013)-ilp32.crate
+  URL:=https://github.com/ilp32wrt/packages/releases/download/rust-libc-$(RUST_ILP32_LIBC_VERSION)-ilp32
+  HASH:=fb6f5f991ed9671be9cfb520873f6742f38f62773f1dea10d03109baace7eb56
+endef
+$(eval $(call Download,target-lexicon013-ilp32))
+
+define Download/target-lexicon012-ilp32
+  FILE:=target-lexicon-$(RUST_ILP32_TARGET_LEXICON012)-ilp32.crate
+  URL:=https://github.com/ilp32wrt/packages/releases/download/rust-libc-$(RUST_ILP32_LIBC_VERSION)-ilp32
+  HASH:=b7abe3471d6cba0e2a4bb18e0b0657a27a64058063cb3c6f60e426f60e3371fe
+endef
+$(eval $(call Download,target-lexicon012-ilp32))
+
 define Package/rust
   SECTION:=lang
   CATEGORY:=Languages
@@ -149,6 +167,9 @@ define Host/Install
 	rm -rf $(STAGING_DIR)/host/share/rust-ilp32/cpufeatures-*
 	tar -xzf $(DL_DIR)/cpufeatures-$(RUST_ILP32_CPUFEATURES02)-ilp32.crate -C $(STAGING_DIR)/host/share/rust-ilp32
 	tar -xzf $(DL_DIR)/cpufeatures-$(RUST_ILP32_CPUFEATURES03)-ilp32.crate -C $(STAGING_DIR)/host/share/rust-ilp32
+	rm -rf $(STAGING_DIR)/host/share/rust-ilp32/target-lexicon-*
+	tar -xzf $(DL_DIR)/target-lexicon-$(RUST_ILP32_TARGET_LEXICON013)-ilp32.crate -C $(STAGING_DIR)/host/share/rust-ilp32
+	tar -xzf $(DL_DIR)/target-lexicon-$(RUST_ILP32_TARGET_LEXICON012)-ilp32.crate -C $(STAGING_DIR)/host/share/rust-ilp32
 endef
 
 $(eval $(call HostBuild))
