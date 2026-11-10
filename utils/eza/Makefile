@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=eza
 PKG_VERSION:=0.23.4
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/eza-community/eza/tar.gz/v$(PKG_VERSION)?
@@ -17,6 +17,12 @@ PKG_BUILD_PARALLEL:=1
 
 include $(INCLUDE_DIR)/package.mk
 include ../../lang/rust/rust-package.mk
+
+# AArch64 ILP32: the vendored libgit2 (libgit2-sys) picks __builtin_umul_overflow because SIZE_MAX ==
+# UINT_MAX, but size_t is unsigned long; both are 32 bits there, so only GCC 14's type check fails
+ifeq ($(CONFIG_AARCH64_ABI_ILP32),y)
+  TARGET_CFLAGS += -Wno-error=incompatible-pointer-types
+endif
 
 define Package/eza
   SECTION:=utils
