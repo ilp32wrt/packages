@@ -137,16 +137,33 @@ CARGO_PKG_PROFILE:=$(if $(CONFIG_DEBUG),dev,release)
 
 CARGO_RUSTFLAGS+=-Clink-arg=-fuse-ld=$(TARGET_LINKER)
 
-# AArch64 ILP32: crates.io's libc has no AArch64 ILP32 port and cpufeatures assumes a 64-bit
-# c_ulong. lang/rust installs fixed crates; this cargo config in the target build directory makes every cargo run below it use it
-# (rust-package.mk, but also CMake (fish) and maturin/setuptools-rust (Python) builds).
+# AArch64 ILP32: crates.io's libc has no AArch64 ILP32 port and cpufeatures assumes a 64-bit c_ulong.
+# lang/rust installs fixed crates; cargo packages use them through [patch.crates-io]:
+# - rust-package.mk passes RUST_ILP32_CARGO_ARGS (cargo install --path does not read the package's
+#   .cargo/config.toml);
+# - after prepare, every target package that includes this file (also CMake and maturin builds) gets
+#   $(PKG_BUILD_DIR)/.cargo/config.toml, and its Cargo.lock files are moved to the patched crates, so
+#   that --locked holds. Not in $(BUILD_DIR) itself: rust's own host build (--frozen) is below it.
 ifeq ($(CONFIG_AARCH64_ABI_ILP32),y)
   RUST_ILP32_CRATES:=$(STAGING_DIR)/host/share/rust-ilp32
-  ifneq ($(BUILD_DIR),)
-    $(shell mkdir -p '$(BUILD_DIR)/.cargo' && \
-      printf '[patch.crates-io]\nlibc = { path = "%s/libc-0.2.191" }\ncpufeatures = { path = "%s/cpufeatures-0.2.17" }\ncpufeatures03 = { path = "%s/cpufeatures-0.3.1", package = "cpufeatures" }\n' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' > '$(BUILD_DIR)/.cargo/config.toml.new' && \
-      { cmp -s '$(BUILD_DIR)/.cargo/config.toml.new' '$(BUILD_DIR)/.cargo/config.toml' && \
-        rm -f '$(BUILD_DIR)/.cargo/config.toml.new' || \
-        mv '$(BUILD_DIR)/.cargo/config.toml.new' '$(BUILD_DIR)/.cargo/config.toml'; })
+  RUST_ILP32_CARGO_ARGS:= \
+	--config 'patch.crates-io.libc.path="$(RUST_ILP32_CRATES)/libc-0.2.191"' \
+	--config 'patch.crates-io.cpufeatures.path="$(RUST_ILP32_CRATES)/cpufeatures-0.2.17"' \
+	--config 'patch.crates-io.cpufeatures03.path="$(RUST_ILP32_CRATES)/cpufeatures-0.3.1"' \
+	--config 'patch.crates-io.cpufeatures03.package="cpufeatures"'
+
+  define RustIlp32/CargoPatch
+	mkdir -p $(PKG_BUILD_DIR)/.cargo
+	printf '[patch.crates-io]\nlibc = { path = "%s/libc-0.2.191" }\ncpufeatures = { path = "%s/cpufeatures-0.2.17" }\ncpufeatures03 = { path = "%s/cpufeatures-0.3.1", package = "cpufeatures" }\n' \
+		'$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' > $(PKG_BUILD_DIR)/.cargo/config.toml
+	for lock in $$$$(find $(PKG_BUILD_DIR) -name Cargo.lock -not -path '*/vendor/*' -not -path '*/target/*'); do \
+		for crate in libc cpufeatures; do \
+			( cd "$$$$(dirname "$$$$lock")" && CARGO_HOME=$(CARGO_HOME) $(STAGING_DIR)/host/bin/cargo update -p $$$$crate ) \
+				> /dev/null 2>&1 || true; \
+		done; \
+	done
+  endef
+  ifneq ($(PKG_NAME),rust)
+    Hooks/Prepare/Post += RustIlp32/CargoPatch
   endif
 endif

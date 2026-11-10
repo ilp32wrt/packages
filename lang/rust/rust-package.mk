@@ -37,17 +37,12 @@ ifeq ($(strip $(RUST_PKG_LOCKED)),1)
   CARGO_PKG_ARGS+= --locked
 endif
 
-# AArch64 ILP32: rust-values.mk patches crates.io's libc with the ILP32 port for all cargo runs in
-# the target build directory; move Cargo.lock to it first, so that --locked holds
-ifeq ($(CONFIG_AARCH64_ABI_ILP32),y)
-  CARGO_ILP32_PATCH:=1
-endif
+# AArch64 ILP32: the fixed libc/cpufeatures crates (rust-values.mk; Cargo.lock is updated after prepare)
+CARGO_PKG_ARGS+= $(RUST_ILP32_CARGO_ARGS)
 
 # $(1) path to the package (optional)
 # $(2) additional arguments to cargo (optional)
 define Build/Compile/Cargo
-	$(if $(CARGO_ILP32_PATCH),+$(CARGO_PKG_VARS) cargo update --manifest-path "$(PKG_BUILD_DIR)/$(if $(strip $(1)),$(strip $(1)),$(strip $(MAKE_PATH)))/Cargo.toml" -p libc || true)
-	$(if $(CARGO_ILP32_PATCH),+$(CARGO_PKG_VARS) cargo update --manifest-path "$(PKG_BUILD_DIR)/$(if $(strip $(1)),$(strip $(1)),$(strip $(MAKE_PATH)))/Cargo.toml" -p cpufeatures || true)
 	+$(CARGO_PKG_VARS) \
 	cargo install -v \
 		--profile $(CARGO_PKG_PROFILE) \
