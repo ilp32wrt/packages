@@ -156,18 +156,38 @@ ifeq ($(CONFIG_AARCH64_ABI_ILP32),y)
 	--config 'patch.crates-io.target-lexicon012.path="$(RUST_ILP32_CRATES)/target-lexicon-0.12.16"' \
 	--config 'patch.crates-io.target-lexicon012.package="target-lexicon"'
 
-  define RustIlp32/CargoPatch
-	mkdir -p $(PKG_BUILD_DIR)/.cargo
-	printf '[patch.crates-io]\nlibc = { path = "%s/libc-0.2.191" }\ncpufeatures = { path = "%s/cpufeatures-0.2.17" }\ncpufeatures03 = { path = "%s/cpufeatures-0.3.1", package = "cpufeatures" }\ntarget-lexicon = { path = "%s/target-lexicon-0.13.5" }\ntarget-lexicon012 = { path = "%s/target-lexicon-0.12.16", package = "target-lexicon" }\n' \
-		'$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' > $(PKG_BUILD_DIR)/.cargo/config.toml
-	for lock in $$$$(find $(PKG_BUILD_DIR) -name Cargo.lock -not -path '*/vendor/*' -not -path '*/target/*'); do \
-		for crate in libc cpufeatures target-lexicon; do \
-			( cd "$$$$(dirname "$$$$lock")" && CARGO_HOME=$(CARGO_HOME) $(STAGING_DIR)/host/bin/cargo update -p $$$$crate ) \
-				> /dev/null 2>&1 || true; \
+  # PATH: cargo update asks rustc for its version (rust-version aware resolution); the staging
+  # rustc is not in PATH during prepare. The log stays in .cargo/ilp32-update.log.
+  RUST_ILP32_CARGO_UPDATE = \
+	for lock in $$$$(find $(1) -name Cargo.lock -not -path '*/vendor/*' -not -path '*/target/*'); do \
+		for crate in $(2); do \
+			( cd "$$$$(dirname "$$$$lock")" && PATH=$(STAGING_DIR)/host/bin:$$$$PATH CARGO_HOME=$(CARGO_HOME) \
+				cargo update -p $$$$crate ) >> $(1)/.cargo/ilp32-update.log 2>&1 || true; \
 		done; \
 	done
+
+  define RustIlp32/CargoPatch
+	if [ -d $(RUST_ILP32_CRATES)/libc-0.2.191 ]; then \
+		mkdir -p $(PKG_BUILD_DIR)/.cargo && \
+		printf '[patch.crates-io]\nlibc = { path = "%s/libc-0.2.191" }\ncpufeatures = { path = "%s/cpufeatures-0.2.17" }\ncpufeatures03 = { path = "%s/cpufeatures-0.3.1", package = "cpufeatures" }\ntarget-lexicon = { path = "%s/target-lexicon-0.13.5" }\ntarget-lexicon012 = { path = "%s/target-lexicon-0.12.16", package = "target-lexicon" }\n' \
+			'$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' \
+			> $(PKG_BUILD_DIR)/.cargo/config.toml && \
+		$(call RUST_ILP32_CARGO_UPDATE,$(PKG_BUILD_DIR),libc cpufeatures target-lexicon); \
+	fi
   endef
+
+  # host tools that run for the ILP32 target (maturin) must parse its triple: target-lexicon only
+  define RustIlp32/HostCargoPatch
+	if [ -d $(RUST_ILP32_CRATES)/target-lexicon-0.13.5 ]; then \
+		mkdir -p $(HOST_BUILD_DIR)/.cargo && \
+		printf '[patch.crates-io]\ntarget-lexicon = { path = "%s/target-lexicon-0.13.5" }\ntarget-lexicon012 = { path = "%s/target-lexicon-0.12.16", package = "target-lexicon" }\n' \
+			'$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' > $(HOST_BUILD_DIR)/.cargo/config.toml && \
+		$(call RUST_ILP32_CARGO_UPDATE,$(HOST_BUILD_DIR),target-lexicon); \
+	fi
+  endef
+
   ifneq ($(PKG_NAME),rust)
     Hooks/Prepare/Post += RustIlp32/CargoPatch
+    Hooks/HostPrepare/Post += RustIlp32/HostCargoPatch
   endif
 endif
