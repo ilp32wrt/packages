@@ -9,16 +9,16 @@ builds (ucode) picked up the wrong header. Install include/ only.
 ---
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -326,7 +326,11 @@
+@@ -327,7 +327,11 @@
  ENDIF (ENABLE_DRAFTS)
  
  source_group ("Header Files" FILES ${czmq_headers})
--install(FILES ${czmq_headers} DESTINATION include)
+-install(FILES ${czmq_headers} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 +# only the public headers: the list also has private src/ files (src/foreign/sha1/sha1.h would
 +# replace other packages' sha1.h in the same prefix)
 +set(czmq_public_headers ${czmq_headers})
 +list(FILTER czmq_public_headers INCLUDE REGEX "^include/")
-+install(FILES ${czmq_public_headers} DESTINATION include)
++install(FILES ${czmq_public_headers} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
  
  ########################################################################
  # library
