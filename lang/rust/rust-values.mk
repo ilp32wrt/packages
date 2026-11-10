@@ -138,7 +138,7 @@ CARGO_PKG_PROFILE:=$(if $(CONFIG_DEBUG),dev,release)
 CARGO_RUSTFLAGS+=-Clink-arg=-fuse-ld=$(TARGET_LINKER)
 
 # AArch64 ILP32: the cargo patches for the fixed crates (libc, cpufeatures, target-lexicon) live in
-# rust-ilp32.mk. lang/rust itself does not include it, so changes there do not rebuild rust.
+# lang/rust-ilp32/ (outside lang/rust, whose whole directory is in rust's prepare hash).
 ifneq ($(PKG_NAME),rust)
-  include $(dir $(lastword $(MAKEFILE_LIST)))rust-ilp32.mk
+  include $(dir $(lastword $(MAKEFILE_LIST)))../rust-ilp32/rust-ilp32.mk
 endif
