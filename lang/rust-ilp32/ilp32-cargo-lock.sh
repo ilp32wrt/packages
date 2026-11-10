@@ -19,12 +19,15 @@ series() { # 0.2.17 -> 0.2 ; 1.4.0 -> 1
 
 # versions of crate $2 in lock $1 that come from a registry (not the path patch)
 registry_versions() {
+	# every table header ends the previous entry; only [[package]] entries count
+	# ([[patch.unused]] has name/version but no source)
 	awk -v want="$2" '
-		/^\[\[package\]\]/ { if (n == want && src ~ /^registry/) print v; n = ""; v = ""; src = "" ; next }
+		function flush() { if (pkg && n == want && src ~ /^registry/) print v; n = ""; v = ""; src = "" }
+		/^\[/ { flush(); pkg = ($0 ~ /^\[\[package\]\]/); next }
 		/^name = /    { gsub(/"/, "", $3); n = $3 }
 		/^version = / { gsub(/"/, "", $3); v = $3 }
 		/^source = /  { gsub(/"/, "", $3); src = $3 }
-		END { if (n == want && src ~ /^registry/) print v }
+		END { flush() }
 	' "$1"
 }
 
