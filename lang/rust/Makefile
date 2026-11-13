@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=rust
 PKG_VERSION:=1.96.0
-PKG_RELEASE:=4
+PKG_RELEASE:=5
 
 PKG_SOURCE:=rustc-$(PKG_VERSION)-src.tar.xz
 PKG_SOURCE_URL:=https://static.rust-lang.org/dist/
@@ -31,6 +31,7 @@ include ./rust-values.mk
 #   libc: AArch64 ILP32 glibc/musl port
 #   cpufeatures: assumes a 64-bit c_ulong on aarch64 (getauxval)
 #   target-lexicon (pyo3-build-config etc.): does not know the musl_ilp32 environment
+#   pnet_sys: assumes tv_usec is a c_long
 RUST_ILP32_LIBC_VERSION:=0.2.191
 RUST_ILP32_LIBC_HASH:=65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a
 RUST_ILP32_CRATE_LIST:=
@@ -74,6 +75,14 @@ define Download/target-lexicon-0.12.16
 endef
 $(eval $(call Download,target-lexicon-0.12.16))
 RUST_ILP32_CRATE_LIST+=target-lexicon-0.12.16
+
+define Download/pnet_sys-0.33.0
+  FILE:=pnet_sys-0.33.0.crate
+  URL:=https://static.crates.io/crates/pnet_sys
+  HASH:=faf7a58b2803d818a374be9278a1fe8f88fce14b936afbe225000cfcd9c73f16
+endef
+$(eval $(call Download,pnet_sys-0.33.0))
+RUST_ILP32_CRATE_LIST+=pnet_sys-0.33.0
 
 define Package/rust
   SECTION:=lang

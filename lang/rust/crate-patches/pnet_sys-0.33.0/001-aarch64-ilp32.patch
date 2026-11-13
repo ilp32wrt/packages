@@ -1,0 +1,13 @@
+AArch64 ILP32: tv_usec is suseconds_t (64-bit), not c_long
+
+--- a/src/unix.rs
++++ b/src/unix.rs
+@@ -94,7 +94,7 @@
+     pub fn duration_to_timeval(dur: Duration) -> libc::timeval {
+         libc::timeval {
+             tv_sec: dur.as_secs() as libc::time_t,
+-            tv_usec: dur.subsec_micros() as TvUsecType,
++            tv_usec: dur.subsec_micros() as _,
+         }
+     }
+ 

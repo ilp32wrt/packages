@@ -6,7 +6,8 @@
 RUST_ILP32_DIR:=$(abspath $(dir $(lastword $(MAKEFILE_LIST))))/
 
 # AArch64 ILP32: crates.io's libc has no AArch64 ILP32 port, cpufeatures assumes a 64-bit c_ulong,
-# and target-lexicon does not know the musl_ilp32 environment (pyo3-build-config).
+# target-lexicon does not know the musl_ilp32 environment (pyo3-build-config), and pnet_sys assumes
+# that tv_usec is a c_long.
 # lang/rust installs fixed crates; cargo packages use them through [patch.crates-io]:
 # - rust-package.mk passes RUST_ILP32_CARGO_ARGS (cargo install --path does not read the package's
 #   .cargo/config.toml);
@@ -24,7 +25,8 @@ ifeq ($(CONFIG_AARCH64_ABI_ILP32),y)
 	--config 'patch.crates-io.cpufeatures03.package="cpufeatures"' \
 	--config 'patch.crates-io.target-lexicon.path="$(RUST_ILP32_CRATES)/target-lexicon-0.13.5"' \
 	--config 'patch.crates-io.target-lexicon012.path="$(RUST_ILP32_CRATES)/target-lexicon-0.12.16"' \
-	--config 'patch.crates-io.target-lexicon012.package="target-lexicon"'
+	--config 'patch.crates-io.target-lexicon012.package="target-lexicon"' \
+	--config 'patch.crates-io.pnet_sys.path="$(RUST_ILP32_CRATES)/pnet_sys-0.33.0"'
 
   # moves Cargo.lock to the fixed crates; fails if a crates.io copy of one stays (see the script)
   # PATH: cargo asks rustc for its version; the staging rustc is not in PATH during prepare
@@ -34,10 +36,10 @@ ifeq ($(CONFIG_AARCH64_ABI_ILP32),y)
   define RustIlp32/CargoPatch
 	if [ -d $(RUST_ILP32_CRATES)/libc-0.2.191 ]; then \
 		mkdir -p $(PKG_BUILD_DIR)/.cargo && \
-		printf '[patch.crates-io]\nlibc = { path = "%s/libc-0.2.191" }\ncpufeatures = { path = "%s/cpufeatures-0.2.17" }\ncpufeatures03 = { path = "%s/cpufeatures-0.3.1", package = "cpufeatures" }\ntarget-lexicon = { path = "%s/target-lexicon-0.13.5" }\ntarget-lexicon012 = { path = "%s/target-lexicon-0.12.16", package = "target-lexicon" }\n' \
-			'$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' \
+		printf '[patch.crates-io]\nlibc = { path = "%s/libc-0.2.191" }\ncpufeatures = { path = "%s/cpufeatures-0.2.17" }\ncpufeatures03 = { path = "%s/cpufeatures-0.3.1", package = "cpufeatures" }\ntarget-lexicon = { path = "%s/target-lexicon-0.13.5" }\ntarget-lexicon012 = { path = "%s/target-lexicon-0.12.16", package = "target-lexicon" }\npnet_sys = { path = "%s/pnet_sys-0.33.0" }\n' \
+			'$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' '$(RUST_ILP32_CRATES)' \
 			> $(PKG_BUILD_DIR)/.cargo/config.toml && \
-		$(call RUST_ILP32_LOCK,$(PKG_BUILD_DIR),libc@0.2.191 cpufeatures@0.2.17 cpufeatures@0.3.1 target-lexicon@0.13.5 target-lexicon@0.12.16); \
+		$(call RUST_ILP32_LOCK,$(PKG_BUILD_DIR),libc@0.2.191 cpufeatures@0.2.17 cpufeatures@0.3.1 target-lexicon@0.13.5 target-lexicon@0.12.16 pnet_sys@0.33.0); \
 	fi
   endef
 

@@ -1,0 +1,25 @@
+AArch64 ILP32: timespec without the private padding field
+
+Other crates build timespec with a struct literal (rustix 1.0.8, pnet_sys 0.33.0), which a private
+field forbids. On little-endian the padding is the struct's tail padding anyway (time_t is 8-byte
+aligned, size stays 16), and the kernel ignores the upper half of tv_nsec for ILP32 tasks, which
+musl's own struct timespec (unnamed bit-field) relies on as well.
+
+--- a/src/unix/mod.rs
++++ b/src/unix/mod.rs
+@@ -90,7 +90,14 @@
+         pub tv_nsec: i64,
+         #[cfg(not(all(target_arch = "x86_64", target_pointer_width = "32")))]
+         pub tv_nsec: c_long,
+-        #[cfg(all(musl32_time64, target_endian = "little"))]
++        // AArch64 ILP32: no private field, so that `timespec { tv_sec, tv_nsec }` in other crates
++        // (rustix, pnet_sys) compiles; the tail padding is implicit (time_t is 8-byte aligned) and
++        // the kernel ignores the upper half of tv_nsec for ILP32 tasks, as with musl's own struct.
++        #[cfg(all(
++            musl32_time64,
++            target_endian = "little",
++            not(all(target_arch = "aarch64", target_pointer_width = "32"))
++        ))]
+         __pad0: Padding<u32>,
+     }
+ 
